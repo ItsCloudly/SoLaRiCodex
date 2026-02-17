@@ -25,6 +25,44 @@ const addIndexerSchema = z.object({
   priority: z.number().default(100),
 });
 
+const testConnectionSchema = z.object({
+  baseUrl: z.string().trim().min(1),
+  apiKey: z.string().optional(),
+});
+
+interface TestConnectionResult {
+  success: boolean;
+  message: string;
+  status: 200 | 502;
+}
+
+async function testIndexerConnection(baseUrl: string, apiKey?: string): Promise<TestConnectionResult> {
+  try {
+    const normalizedBaseUrl = baseUrl.endsWith('/')
+      ? baseUrl
+      : `${baseUrl}/`;
+    const endpoint = new URL('api/v2.0/indexers/all/results/torznab/api', normalizedBaseUrl);
+    endpoint.searchParams.set('t', 'caps');
+    if (apiKey && apiKey.trim().length > 0) {
+      endpoint.searchParams.set('apikey', apiKey.trim());
+    }
+
+    const response = await fetch(endpoint, { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) {
+      return {
+        success: false,
+        message: `Indexer responded with HTTP ${response.status}`,
+        status: 502,
+      };
+    }
+
+    return { success: true, message: 'Connection successful', status: 200 };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Connection failed';
+    return { success: false, message, status: 502 };
+  }
+}
+
 // Get all indexers
 indexersRoutes.get('/', async (c) => {
   const results = await db.select().from(indexers);
@@ -100,6 +138,15 @@ indexersRoutes.delete('/:id', async (c) => {
   return c.json({ message: 'Indexer deleted' });
 });
 
+// Test ad-hoc indexer connection
+indexersRoutes.post('/test', async (c) => {
+  const body = await c.req.json();
+  const data = testConnectionSchema.parse(body);
+
+  const result = await testIndexerConnection(data.baseUrl, data.apiKey);
+  return c.json({ success: result.success, message: result.message }, result.status);
+});
+
 // Test indexer connection
 indexersRoutes.get('/:id/test', async (c) => {
   const id = parseIdParam(c.req.param('id'));
@@ -109,26 +156,9 @@ indexersRoutes.get('/:id/test', async (c) => {
   if (!result[0]) return c.json({ error: 'Indexer not found' }, 404);
 
   const indexer = result[0];
-
-  try {
-    const baseUrl = indexer.baseUrl.endsWith('/')
-      ? indexer.baseUrl
-      : `${indexer.baseUrl}/`;
-    const endpoint = new URL('api/v2.0/indexers/all/results/torznab/api', baseUrl);
-    endpoint.searchParams.set('t', 'caps');
-    if (indexer.apiKey) endpoint.searchParams.set('apikey', indexer.apiKey);
-
-    const response = await fetch(endpoint, { signal: AbortSignal.timeout(5000) });
-    if (!response.ok) {
-      return c.json({
-        success: false,
-        message: `Indexer responded with HTTP ${response.status}`,
-      }, 502);
-    }
-
-    return c.json({ success: true, message: 'Connection successful' });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Connection failed';
-    return c.json({ success: false, message }, 502);
-  }
+  const connectionResult = await testIndexerConnection(indexer.baseUrl, indexer.apiKey ?? undefined);
+  return c.json(
+    { success: connectionResult.success, message: connectionResult.message },
+    connectionResult.status,
+  );
 });

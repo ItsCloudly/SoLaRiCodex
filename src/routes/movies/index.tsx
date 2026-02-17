@@ -1,4 +1,4 @@
-import { createAsync } from '@solidjs/router';
+import { createAsync, useNavigate } from '@solidjs/router';
 import MainLayout from '~/components/layout/MainLayout';
 import { Card, Button, Badge } from '~/components/ui';
 import { Film, Plus, Search, Filter } from 'lucide-solid';
@@ -8,9 +8,12 @@ const fetchMovies = () => fetchJson<any[]>('/api/media/movies');
 
 export default function Movies() {
   const moviesResult = createAsync(fetchMovies);
+  const navigate = useNavigate();
 
   const movies = () => moviesResult()?.data ?? [];
   const error = () => moviesResult()?.error;
+  const openMovieSearch = () => void navigate('/search?category=movies');
+  const openMovieDetails = (movieId: number) => void navigate(`/movies/${movieId}`);
 
   return (
     <MainLayout>
@@ -34,7 +37,7 @@ export default function Movies() {
               Filter
             </Button>
 
-            <Button variant="primary">
+            <Button variant="primary" onClick={openMovieSearch}>
               <Plus size={18} />
               Add Movie
             </Button>
@@ -53,14 +56,14 @@ export default function Movies() {
               <Film size={64} />
               <h3>No movies yet</h3>
               <p>Start building your library by adding movies</p>
-              <Button variant="primary" size="lg">
+              <Button variant="primary" size="lg" onClick={openMovieSearch}>
                 <Plus size={20} />
                 Add Your First Movie
               </Button>
             </div>
           ) : (
             movies().map((movie: any) => (
-              <Card class="movie-card" key={movie.id}>
+              <Card class="movie-card" key={movie.id} onClick={() => openMovieDetails(movie.id)}>
                 <div class="movie-poster">
                   {movie.posterPath ? (
                     <img src={movie.posterPath} alt={movie.title} />

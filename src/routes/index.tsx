@@ -1,4 +1,5 @@
 import { createAsync } from '@solidjs/router';
+import { createSignal } from 'solid-js';
 import MainLayout from '~/components/layout/MainLayout';
 import { Card, CardHeader, CardTitle } from '~/components/ui';
 import { Film, Tv, Music, Download } from 'lucide-solid';
@@ -11,6 +12,7 @@ const fetchHealth = () => fetchJson<{ status: string; timestamp: string }>('/api
 export default function Dashboard() {
   const statsResult = createAsync(fetchStats);
   const healthResult = createAsync(fetchHealth);
+  const [showApiResponse, setShowApiResponse] = createSignal(false);
 
   const stats = () => statsResult()?.data;
   const statsError = () => statsResult()?.error;
@@ -28,7 +30,14 @@ export default function Dashboard() {
         <header class="dashboard-header">
           <h1 class="section-title">System Overview</h1>
           <div class="header-actions">
-            <span class="timestamp">API Status: {apiStatus()}</span>
+            <button
+              type="button"
+              class="timestamp api-status-toggle"
+              onClick={() => setShowApiResponse((current) => !current)}
+              aria-expanded={showApiResponse()}
+            >
+              API Status: {apiStatus()} {showApiResponse() ? '(hide)' : '(click for details)'}
+            </button>
           </div>
         </header>
 
@@ -41,7 +50,7 @@ export default function Dashboard() {
           </Card>
         )}
 
-        {health() && (
+        {showApiResponse() && health() && (
           <Card>
             <CardHeader>
               <CardTitle>API Response</CardTitle>

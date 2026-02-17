@@ -28,6 +28,9 @@ export default function SettingsPage() {
   const [loading, setLoading] = createSignal(true);
   const [statusMessage, setStatusMessage] = createSignal<string | null>(null);
   const [errorMessage, setErrorMessage] = createSignal<string | null>(null);
+  const [testingJackett, setTestingJackett] = createSignal(false);
+  const [jackettTestMessage, setJackettTestMessage] = createSignal<string | null>(null);
+  const [jackettTestError, setJackettTestError] = createSignal<string | null>(null);
 
   const [form, setForm] = createStore({
     serverPort: '3000',
@@ -157,6 +160,43 @@ export default function SettingsPage() {
     setSaving(false);
   };
 
+  const handleTestJackettConnection = async () => {
+    const baseUrl = form.jackettUrl.trim();
+    const apiKey = form.jackettApiKey.trim();
+
+    setJackettTestMessage(null);
+    setJackettTestError(null);
+
+    if (!baseUrl) {
+      setJackettTestError('Enter a Jackett URL before testing');
+      return;
+    }
+
+    setTestingJackett(true);
+
+    try {
+      const response = await requestJson<{ success: boolean; message: string }>('/api/indexers/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseUrl, apiKey }),
+      });
+
+      if (response.error) {
+        setJackettTestError(response.error);
+        return;
+      }
+
+      if (!response.data?.success) {
+        setJackettTestError(response.data?.message || 'Connection failed');
+        return;
+      }
+
+      setJackettTestMessage(response.data.message);
+    } finally {
+      setTestingJackett(false);
+    }
+  };
+
   return (
     <MainLayout>
       <div class="settings-page">
@@ -281,6 +321,19 @@ export default function SettingsPage() {
                       placeholder="Enter Jackett API key"
                     />
                   </div>
+
+                  <div class="settings-inline-actions">
+                    <Button
+                      variant="secondary"
+                      onClick={handleTestJackettConnection}
+                      disabled={testingJackett()}
+                    >
+                      {testingJackett() ? 'Testing...' : 'Test Connection'}
+                    </Button>
+                  </div>
+
+                  {jackettTestError() && <p class="inline-feedback error">{jackettTestError()}</p>}
+                  {jackettTestMessage() && <p class="inline-feedback success">{jackettTestMessage()}</p>}
                 </div>
               </Card>
             )}

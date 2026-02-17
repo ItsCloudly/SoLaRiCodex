@@ -1,4 +1,4 @@
-import { createAsync } from '@solidjs/router';
+import { createAsync, useNavigate } from '@solidjs/router';
 import MainLayout from '~/components/layout/MainLayout';
 import { Card, Button, Badge } from '~/components/ui';
 import { Tv, Plus, Search, Filter } from 'lucide-solid';
@@ -8,9 +8,11 @@ const fetchSeries = () => fetchJson<any[]>('/api/media/tv');
 
 export default function TVShows() {
   const seriesResult = createAsync(fetchSeries);
+  const navigate = useNavigate();
 
   const series = () => seriesResult()?.data ?? [];
   const error = () => seriesResult()?.error;
+  const openTvSearch = () => void navigate('/search?category=tv');
 
   return (
     <MainLayout>
@@ -35,7 +37,7 @@ export default function TVShows() {
               Filter
             </Button>
 
-            <Button variant="primary">
+            <Button variant="primary" onClick={openTvSearch}>
               <Plus size={18} />
               Add Series
             </Button>
@@ -54,7 +56,7 @@ export default function TVShows() {
               <Tv size={64} />
               <h3>No TV shows yet</h3>
               <p>Start building your library by adding TV series</p>
-              <Button variant="primary" size="lg">
+              <Button variant="primary" size="lg" onClick={openTvSearch}>
                 <Plus size={20} />
                 Add Your First Series
               </Button>

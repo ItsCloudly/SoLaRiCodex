@@ -1,4 +1,4 @@
-import { createAsync } from '@solidjs/router';
+import { createAsync, useNavigate } from '@solidjs/router';
 import MainLayout from '~/components/layout/MainLayout';
 import { Card, Button, Badge } from '~/components/ui';
 import { Music, Plus, Search, Filter, Disc } from 'lucide-solid';
@@ -8,9 +8,11 @@ const fetchArtists = () => fetchJson<any[]>('/api/media/music/artists');
 
 export default function MusicPage() {
   const artistsResult = createAsync(fetchArtists);
+  const navigate = useNavigate();
 
   const artists = () => artistsResult()?.data ?? [];
   const error = () => artistsResult()?.error;
+  const openMusicSearch = () => void navigate('/search?category=music');
 
   return (
     <MainLayout>
@@ -34,7 +36,7 @@ export default function MusicPage() {
             Filter
           </Button>
 
-          <Button variant="primary">
+          <Button variant="primary" onClick={openMusicSearch}>
             <Plus size={18} />
             Add Artist
           </Button>
@@ -52,7 +54,7 @@ export default function MusicPage() {
               <Disc size={64} />
               <h3>No music yet</h3>
               <p>Start building your library by adding artists</p>
-              <Button variant="primary" size="lg">
+              <Button variant="primary" size="lg" onClick={openMusicSearch}>
                 <Plus size={20} />
                 Add Your First Artist
               </Button>
