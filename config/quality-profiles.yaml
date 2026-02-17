@@ -1,0 +1,54 @@
+profiles:
+  - id: "movie-4k"
+    name: "Movies - 4K Quality"
+    mediaType: "movie"
+    allowedQualities:
+      - "2160p BluRay x265 HDR"
+      - "2160p BluRay x265 DV"
+      - "2160p WEB-DL x265"
+    minSize: 15
+    maxSize: 80
+    preferred: "2160p BluRay x265 HDR"
+
+  - id: "movie-1080p"
+    name: "Movies - 1080p Quality"
+    mediaType: "movie"
+    allowedQualities:
+      - "1080p BluRay x264"
+      - "1080p BluRay x265"
+      - "1080p WEB-DL x264"
+      - "1080p WEBRip x264"
+    minSize: 4
+    maxSize: 20
+    preferred: "1080p BluRay x264"
+
+  - id: "tv-1080p"
+    name: "TV - 1080p Quality"
+    mediaType: "tv"
+    allowedQualities:
+      - "1080p WEB-DL x264"
+      - "1080p WEBRip x264"
+      - "1080p HDTV x264"
+    minSize: 1
+    maxSize: 5
+    preferred: "1080p WEB-DL x264"
+
+  - id: "music-flac"
+    name: "Music - FLAC Lossless"
+    mediaType: "music"
+    allowedQualities:
+      - "FLAC"
+      - "FLAC 24bit"
+    minSize: 100
+    maxSize: 1000
+    preferred: "FLAC 24bit"
+
+  - id: "music-mp3"
+    name: "Music - MP3 Quality"
+    mediaType: "music"
+    allowedQualities:
+      - "MP3 320kbps"
+      - "MP3 V0"
+    minSize: 50
+    maxSize: 300
+    preferred: "MP3 320kbps"

@@ -1,0 +1,180 @@
+{
+  "_api-BB7gk3Fl.js": {
+    "file": "assets/api-BB7gk3Fl.js",
+    "name": "api"
+  },
+  "_components-BBzU7VKC.css": {
+    "file": "assets/components-BBzU7VKC.css",
+    "src": "_components-BBzU7VKC.css"
+  },
+  "_components-YnJA_VXq.js": {
+    "file": "assets/components-YnJA_VXq.js",
+    "name": "components",
+    "css": [
+      "assets/components-BBzU7VKC.css"
+    ]
+  },
+  "_download-CECEns1f.js": {
+    "file": "assets/download-CECEns1f.js",
+    "name": "download",
+    "imports": [
+      "_index-Sxd3Q-N6.js"
+    ]
+  },
+  "_hard-drive-Dc-U1AVQ.js": {
+    "file": "assets/hard-drive-Dc-U1AVQ.js",
+    "name": "hard-drive",
+    "imports": [
+      "_index-Sxd3Q-N6.js"
+    ]
+  },
+  "_index-CbO4HDhO.css": {
+    "file": "assets/index-CbO4HDhO.css",
+    "src": "_index-CbO4HDhO.css"
+  },
+  "_index-Sxd3Q-N6.js": {
+    "file": "assets/index-Sxd3Q-N6.js",
+    "name": "index",
+    "imports": [
+      "_components-YnJA_VXq.js"
+    ],
+    "css": [
+      "assets/index-CbO4HDhO.css"
+    ]
+  },
+  "_plus-BT_CnvzS.js": {
+    "file": "assets/plus-BT_CnvzS.js",
+    "name": "plus",
+    "imports": [
+      "_index-Sxd3Q-N6.js"
+    ]
+  },
+  "_server-fns-Dk2UlWmY.js": {
+    "file": "assets/server-fns-Dk2UlWmY.js",
+    "name": "server-fns",
+    "dynamicImports": [
+      "src/routes/activity/index.tsx?pick=default&pick=$css",
+      "src/routes/activity/index.tsx?pick=default&pick=$css",
+      "src/routes/index.tsx?pick=default&pick=$css",
+      "src/routes/index.tsx?pick=default&pick=$css",
+      "src/routes/movies/index.tsx?pick=default&pick=$css",
+      "src/routes/movies/index.tsx?pick=default&pick=$css",
+      "src/routes/music/index.tsx?pick=default&pick=$css",
+      "src/routes/music/index.tsx?pick=default&pick=$css",
+      "src/routes/search/index.tsx?pick=default&pick=$css",
+      "src/routes/search/index.tsx?pick=default&pick=$css",
+      "src/routes/settings/index.tsx?pick=default&pick=$css",
+      "src/routes/settings/index.tsx?pick=default&pick=$css",
+      "src/routes/tv/index.tsx?pick=default&pick=$css",
+      "src/routes/tv/index.tsx?pick=default&pick=$css",
+      "src/app.tsx"
+    ]
+  },
+  "src/app.tsx": {
+    "file": "assets/app-BwPfAnN8.js",
+    "name": "app",
+    "src": "src/app.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_server-fns-Dk2UlWmY.js",
+      "_components-YnJA_VXq.js"
+    ]
+  },
+  "src/routes/activity/index.tsx?pick=default&pick=$css": {
+    "file": "index.js",
+    "name": "index",
+    "src": "src/routes/activity/index.tsx?pick=default&pick=$css",
+    "isEntry": true,
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-Sxd3Q-N6.js",
+      "_api-BB7gk3Fl.js",
+      "_download-CECEns1f.js",
+      "_hard-drive-Dc-U1AVQ.js",
+      "_components-YnJA_VXq.js"
+    ]
+  },
+  "src/routes/index.tsx?pick=default&pick=$css": {
+    "file": "index2.js",
+    "name": "index",
+    "src": "src/routes/index.tsx?pick=default&pick=$css",
+    "isEntry": true,
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-Sxd3Q-N6.js",
+      "_download-CECEns1f.js",
+      "_components-YnJA_VXq.js"
+    ]
+  },
+  "src/routes/movies/index.tsx?pick=default&pick=$css": {
+    "file": "index3.js",
+    "name": "index",
+    "src": "src/routes/movies/index.tsx?pick=default&pick=$css",
+    "isEntry": true,
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-Sxd3Q-N6.js",
+      "_api-BB7gk3Fl.js",
+      "_plus-BT_CnvzS.js",
+      "_components-YnJA_VXq.js"
+    ]
+  },
+  "src/routes/music/index.tsx?pick=default&pick=$css": {
+    "file": "index4.js",
+    "name": "index",
+    "src": "src/routes/music/index.tsx?pick=default&pick=$css",
+    "isEntry": true,
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-Sxd3Q-N6.js",
+      "_api-BB7gk3Fl.js",
+      "_plus-BT_CnvzS.js",
+      "_components-YnJA_VXq.js"
+    ]
+  },
+  "src/routes/search/index.tsx?pick=default&pick=$css": {
+    "file": "index5.js",
+    "name": "index",
+    "src": "src/routes/search/index.tsx?pick=default&pick=$css",
+    "isEntry": true,
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-Sxd3Q-N6.js",
+      "_components-YnJA_VXq.js"
+    ]
+  },
+  "src/routes/settings/index.tsx?pick=default&pick=$css": {
+    "file": "index6.js",
+    "name": "index",
+    "src": "src/routes/settings/index.tsx?pick=default&pick=$css",
+    "isEntry": true,
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-Sxd3Q-N6.js",
+      "_hard-drive-Dc-U1AVQ.js",
+      "_components-YnJA_VXq.js"
+    ]
+  },
+  "src/routes/tv/index.tsx?pick=default&pick=$css": {
+    "file": "index7.js",
+    "name": "index",
+    "src": "src/routes/tv/index.tsx?pick=default&pick=$css",
+    "isEntry": true,
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-Sxd3Q-N6.js",
+      "_api-BB7gk3Fl.js",
+      "_plus-BT_CnvzS.js",
+      "_components-YnJA_VXq.js"
+    ]
+  },
+  "virtual:$vinxi/handler/server-fns": {
+    "file": "server-fns.js",
+    "name": "server-fns",
+    "src": "virtual:$vinxi/handler/server-fns",
+    "isEntry": true,
+    "imports": [
+      "_server-fns-Dk2UlWmY.js"
+    ]
+  }
+}
