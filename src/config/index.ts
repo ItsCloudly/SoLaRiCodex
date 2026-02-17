@@ -30,7 +30,10 @@ export interface SoLaRiConfig {
   apis: {
     tmdb: { apiKey: string };
     omdb: { apiKey: string };
-    musicbrainz: { baseUrl: string };
+    musicbrainz: {
+      baseUrl: string;
+      userAgent: string;
+    };
   };
   fileManagement: {
     renameOnComplete: boolean;
@@ -83,7 +86,7 @@ const defaultConfig: SoLaRiConfig = {
   },
   deluge: {
     host: 'localhost',
-    port: 58846,
+    port: 8112,
     password: '',
   },
   apis: {
@@ -95,6 +98,7 @@ const defaultConfig: SoLaRiConfig = {
     },
     musicbrainz: {
       baseUrl: 'https://musicbrainz.org',
+      userAgent: 'SoLaRi/1.0 (admin@localhost)',
     },
   },
   fileManagement: {

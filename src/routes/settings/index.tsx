@@ -44,8 +44,10 @@ export default function SettingsPage() {
     jackettUrl: 'http://localhost:9117',
     jackettApiKey: '',
     delugeHost: 'localhost',
-    delugePort: '58846',
+    delugePort: '8112',
     delugePassword: '',
+    musicBrainzBaseUrl: 'https://musicbrainz.org',
+    musicBrainzUserAgent: 'SoLaRi/1.0 (admin@localhost)',
     discordEnabled: false,
     discordWebhookUrl: '',
     notifyStarted: false,
@@ -73,6 +75,8 @@ export default function SettingsPage() {
         delugeHost: asString(settings['deluge.host'], form.delugeHost),
         delugePort: String(settings['deluge.port'] ?? form.delugePort),
         delugePassword: asString(settings['deluge.password'], form.delugePassword),
+        musicBrainzBaseUrl: asString(settings['apis.musicbrainz.baseUrl'], form.musicBrainzBaseUrl),
+        musicBrainzUserAgent: asString(settings['apis.musicbrainz.userAgent'], form.musicBrainzUserAgent),
         tmdbApiKey: asString(settings['apis.tmdb.apiKey'], form.tmdbApiKey),
         omdbApiKey: asString(settings['apis.omdb.apiKey'], form.omdbApiKey),
       });
@@ -120,8 +124,10 @@ export default function SettingsPage() {
       'jackett.baseUrl': form.jackettUrl,
       'jackett.apiKey': form.jackettApiKey,
       'deluge.host': form.delugeHost,
-      'deluge.port': Number.parseInt(form.delugePort, 10) || 58846,
+      'deluge.port': Number.parseInt(form.delugePort, 10) || 8112,
       'deluge.password': form.delugePassword,
+      'apis.musicbrainz.baseUrl': form.musicBrainzBaseUrl,
+      'apis.musicbrainz.userAgent': form.musicBrainzUserAgent,
       'apis.tmdb.apiKey': form.tmdbApiKey,
       'apis.omdb.apiKey': form.omdbApiKey,
     };
@@ -346,22 +352,22 @@ export default function SettingsPage() {
 
                 <div class="settings-form">
                   <div class="form-group">
-                    <label>Host</label>
+                    <label>Web UI Host</label>
                     <Input value={form.delugeHost} onInput={(value) => setForm('delugeHost', value)} />
                   </div>
 
                   <div class="form-group">
-                    <label>Port</label>
+                    <label>Web UI Port (JSON-RPC)</label>
                     <Input type="number" value={form.delugePort} onInput={(value) => setForm('delugePort', value)} />
                   </div>
 
                   <div class="form-group">
-                    <label>Password</label>
+                    <label>Web UI Password</label>
                     <Input
                       type="password"
                       value={form.delugePassword}
                       onInput={(value) => setForm('delugePassword', value)}
-                      placeholder="Enter Deluge password"
+                      placeholder="Enter Deluge Web UI password"
                     />
                   </div>
                 </div>
@@ -434,6 +440,24 @@ export default function SettingsPage() {
                 </CardHeader>
 
                 <div class="settings-form">
+                  <div class="form-group">
+                    <label>MusicBrainz Base URL</label>
+                    <Input
+                      value={form.musicBrainzBaseUrl}
+                      onInput={(value) => setForm('musicBrainzBaseUrl', value)}
+                      placeholder="https://musicbrainz.org"
+                    />
+                  </div>
+
+                  <div class="form-group">
+                    <label>MusicBrainz User-Agent</label>
+                    <Input
+                      value={form.musicBrainzUserAgent}
+                      onInput={(value) => setForm('musicBrainzUserAgent', value)}
+                      placeholder="SoLaRi/1.0 (you@example.com)"
+                    />
+                  </div>
+
                   <div class="form-group">
                     <label>TMDB API Key</label>
                     <Input

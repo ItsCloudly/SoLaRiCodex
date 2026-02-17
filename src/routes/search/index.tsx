@@ -17,8 +17,9 @@ interface SearchResultItem {
   year?: number | null;
   genre?: string | null;
   inLibrary: boolean;
-  source: 'tmdb';
+  source: 'tmdb' | 'musicbrainz';
   tmdbId?: number;
+  musicBrainzId?: string;
 }
 
 interface JackettIndexerFilter {
@@ -74,10 +75,31 @@ interface JackettSearchResponse {
   total: number;
 }
 
+interface MusicBrainzReleaseGroupResult {
+  id: string;
+  title: string;
+  disambiguation?: string | null;
+  primaryType?: string | null;
+  secondaryTypes: string[];
+  firstReleaseDate?: string | null;
+}
+
+interface MusicBrainzReleaseGroupsResponse {
+  artistId: string;
+  releases: Array<{
+    id: string;
+    title: string;
+    disambiguation?: string;
+    'primary-type'?: string;
+    'secondary-types'?: string[];
+    'first-release-date'?: string;
+  }>;
+}
+
 const categories = [
   { id: 'movies', label: 'Movies', icon: Film, color: 'var(--accent-primary)', description: 'Search TMDB for movies to add to your library' },
   { id: 'tv', label: 'TV Shows', icon: Tv, color: 'var(--accent-secondary)', description: 'Search TMDB for TV series and episodes' },
-  { id: 'music', label: 'Music', icon: Music, color: 'var(--success)', description: 'Search TMDB people (Sound) for artists' },
+  { id: 'music', label: 'Music', icon: Music, color: 'var(--success)', description: 'Search MusicBrainz artists and records' },
 ] as const;
 
 function formatSize(bytes: number | null | undefined): string {
@@ -101,6 +123,24 @@ function formatPublishDate(value: string | null | undefined): string {
   return parsed.toLocaleString();
 }
 
+function formatMusicReleaseOption(option: MusicBrainzReleaseGroupResult): string {
+  const year = (() => {
+    if (!option.firstReleaseDate) return null;
+    const parsed = new Date(option.firstReleaseDate);
+    if (Number.isNaN(parsed.getTime())) return option.firstReleaseDate;
+    return String(parsed.getUTCFullYear());
+  })();
+
+  const types = [
+    option.primaryType || null,
+    ...(option.secondaryTypes || []),
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+  const suffix = [year, ...types].join(' • ');
+  if (suffix.length === 0) return option.title;
+  return `${option.title} (${suffix})`;
+}
+
 export default function SearchPage() {
   const [searchParams] = useSearchParams();
   const initialCategory = (() => {
@@ -119,6 +159,9 @@ export default function SearchPage() {
   const [infoMessage, setInfoMessage] = createSignal<string | null>(null);
 
   const [selectedJackettItem, setSelectedJackettItem] = createSignal<SearchResultItem | null>(null);
+  const [musicReleaseOptions, setMusicReleaseOptions] = createSignal<MusicBrainzReleaseGroupResult[]>([]);
+  const [loadingMusicReleases, setLoadingMusicReleases] = createSignal(false);
+  const [selectedMusicReleaseId, setSelectedMusicReleaseId] = createSignal('');
   const [jackettFilters, setJackettFilters] = createSignal<JackettFiltersResponse | null>(null);
   const [selectedIndexerIds, setSelectedIndexerIds] = createSignal<number[]>([]);
   const [selectedQualityCategoryIds, setSelectedQualityCategoryIds] = createSignal<number[]>([]);
@@ -134,6 +177,9 @@ export default function SearchPage() {
 
   const resetJackettState = () => {
     setSelectedJackettItem(null);
+    setMusicReleaseOptions([]);
+    setLoadingMusicReleases(false);
+    setSelectedMusicReleaseId('');
     setJackettFilters(null);
     setSelectedIndexerIds([]);
     setSelectedQualityCategoryIds([]);
@@ -212,6 +258,7 @@ export default function SearchPage() {
         overview: result.overview || undefined,
         posterPath: result.posterPath || undefined,
         genre: result.genre || undefined,
+        musicBrainzId: result.musicBrainzId || undefined,
       };
     }
 
@@ -299,14 +346,62 @@ export default function SearchPage() {
     setLoadingJackettFilters(false);
   };
 
+  const loadMusicReleaseGroups = async (artist: SearchResultItem) => {
+    setMusicReleaseOptions([]);
+    setSelectedMusicReleaseId('');
+
+    if (!artist.musicBrainzId) {
+      setJackettMessage('No MusicBrainz artist ID found; searching indexers by artist name only.');
+      return;
+    }
+
+    setLoadingMusicReleases(true);
+
+    const response = await requestJson<MusicBrainzReleaseGroupsResponse>(
+      `/api/search/music/releases?artistId=${encodeURIComponent(artist.musicBrainzId)}`,
+    );
+
+    if (response.error) {
+      setJackettError(response.error);
+      setLoadingMusicReleases(false);
+      return;
+    }
+
+    const releases = (response.data?.releases || []).map((release) => ({
+      id: release.id,
+      title: release.title,
+      disambiguation: release.disambiguation || null,
+      primaryType: release['primary-type'] || null,
+      secondaryTypes: release['secondary-types'] || [],
+      firstReleaseDate: release['first-release-date'] || null,
+    }));
+
+    setMusicReleaseOptions(releases);
+    if (releases.length === 0) {
+      setJackettMessage('No records found in MusicBrainz for this artist; searching by artist name only.');
+    }
+
+    setLoadingMusicReleases(false);
+  };
+
   const prepareJackettSearch = async (result: SearchResultItem) => {
     const category = selectedCategory();
     if (!category) return;
 
     setSelectedJackettItem(result);
+    setMusicReleaseOptions([]);
+    setSelectedMusicReleaseId('');
+    setLoadingMusicReleases(false);
     setJackettResults([]);
     setJackettFailures([]);
+    setJackettError(null);
+    setJackettMessage(null);
+
     await loadJackettFilters(category);
+
+    if (category === 'music') {
+      await loadMusicReleaseGroups(result);
+    }
   };
 
   const updateIdSelection = (
@@ -342,12 +437,22 @@ export default function SearchPage() {
     ]));
     const language = selectedLanguageCode().trim().toLowerCase();
 
+    const selectedRelease = selectedMusicReleaseId().length > 0
+      ? musicReleaseOptions().find((release) => release.id === selectedMusicReleaseId()) || null
+      : null;
+
+    const jackettQuery = (
+      category === 'music' && selectedRelease
+        ? `${selectedItem.title} ${selectedRelease.title}`
+        : selectedItem.title
+    );
+
     const response = await requestJson<JackettSearchResponse>('/api/search/jackett', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         category,
-        query: selectedItem.title,
+        query: jackettQuery,
         tmdbId: selectedItem.tmdbId,
         indexerIds: selectedIndexerIds(),
         categoryIds,
@@ -374,7 +479,7 @@ export default function SearchPage() {
     if ((data.results || []).length === 0) {
       setJackettMessage('No releases found for this media item with the selected filters.');
     } else {
-      setJackettMessage(`Found ${data.total} release${data.total === 1 ? '' : 's'}.`);
+      setJackettMessage(`Found ${data.total} release${data.total === 1 ? '' : 's'} for "${jackettQuery}".`);
     }
 
     setJackettSearching(false);
@@ -580,6 +685,30 @@ export default function SearchPage() {
                 {loadingJackettFilters() && <p>Loading indexer filter options...</p>}
                 {jackettError() && <p class="inline-feedback error">{jackettError()}</p>}
                 {jackettMessage() && <p class="inline-feedback success">{jackettMessage()}</p>}
+
+                {selectedCategory() === 'music' && (
+                  <div class="jackett-filter-group">
+                    <label>Record Selection (MusicBrainz)</label>
+                    {loadingMusicReleases() ? (
+                      <p class="jackett-empty">Loading artist records...</p>
+                    ) : musicReleaseOptions().length === 0 ? (
+                      <p class="jackett-empty">No records loaded. Indexer search will use artist name only.</p>
+                    ) : (
+                      <select
+                        class="input"
+                        value={selectedMusicReleaseId()}
+                        onChange={(event) => setSelectedMusicReleaseId(event.currentTarget.value)}
+                      >
+                        <option value="">Artist only</option>
+                        {musicReleaseOptions().map((releaseOption) => (
+                          <option value={releaseOption.id}>
+                            {formatMusicReleaseOption(releaseOption)}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
 
                 {jackettFilters() && (
                   <div class="jackett-filters">

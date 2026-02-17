@@ -61,7 +61,11 @@ export default function MusicPage() {
             </div>
           ) : (
             artists().map((artist: any) => (
-              <Card class="artist-card" key={artist.id}>
+              <Card
+                class="artist-card"
+                key={artist.id}
+                onClick={() => void navigate(`/music/${artist.id}`)}
+              >
                 <div class="artist-image">
                   {artist.posterPath ? (
                     <img src={artist.posterPath} alt={artist.title} />

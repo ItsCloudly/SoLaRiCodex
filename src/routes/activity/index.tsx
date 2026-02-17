@@ -1,5 +1,5 @@
 import { createAsync } from '@solidjs/router';
-import { createEffect, createSignal } from 'solid-js';
+import { createEffect, createSignal, onMount } from 'solid-js';
 import MainLayout from '~/components/layout/MainLayout';
 import { Card, CardHeader, CardTitle, Badge, Progress, Button } from '~/components/ui';
 import { Activity, Pause, Play, X, Download, Clock, HardDrive } from 'lucide-solid';
@@ -11,6 +11,7 @@ export default function ActivityPage() {
   const downloadsResult = createAsync(fetchDownloads);
 
   const [downloads, setDownloads] = createSignal<any[]>([]);
+  const [loadErrorMessage, setLoadErrorMessage] = createSignal<string | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [activeActionId, setActiveActionId] = createSignal<number | null>(null);
 
@@ -18,10 +19,34 @@ export default function ActivityPage() {
     const payload = downloadsResult();
     if (payload?.data) {
       setDownloads(payload.data);
+      setLoadErrorMessage(null);
+    } else if (payload?.error) {
+      setLoadErrorMessage(payload.error);
     }
   });
 
-  const loadError = () => downloadsResult()?.error;
+  const refreshDownloads = async () => {
+    const payload = await fetchDownloads();
+    if (payload.error) {
+      setLoadErrorMessage(payload.error);
+      return;
+    }
+
+    if (payload.data) {
+      setDownloads(payload.data);
+      setLoadErrorMessage(null);
+    }
+  };
+
+  onMount(() => {
+    const interval = setInterval(() => {
+      void refreshDownloads();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  });
+
+  const loadError = () => loadErrorMessage() || downloadsResult()?.error;
 
   const activeDownloads = () => downloads().filter((d: any) => ['downloading', 'queued', 'paused'].includes(d.status));
   const completedDownloads = () => downloads().filter((d: any) => d.status === 'completed');

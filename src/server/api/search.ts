@@ -19,8 +19,9 @@ interface SearchResult {
   year?: number | null;
   genre?: string | null;
   inLibrary: boolean;
-  source: 'tmdb';
+  source: 'tmdb' | 'musicbrainz';
   tmdbId?: number;
+  musicBrainzId?: string;
 }
 
 interface TmdbSearchResponse<T> {
@@ -45,14 +46,6 @@ interface TmdbTvResult {
   poster_path?: string | null;
   backdrop_path?: string | null;
   first_air_date?: string | null;
-}
-
-interface TmdbPersonResult {
-  id: number;
-  name: string;
-  profile_path?: string | null;
-  known_for_department?: string | null;
-  known_for?: Array<{ title?: string | null; name?: string | null }>;
 }
 
 interface TmdbMovieExternalIds {
@@ -118,7 +111,43 @@ interface JackettFailure {
   message: string;
 }
 
+interface MusicBrainzArtist {
+  id: string;
+  name: string;
+  disambiguation?: string;
+  country?: string;
+  tags?: Array<{
+    name?: string;
+    count?: number;
+  }>;
+  'life-span'?: {
+    begin?: string;
+    end?: string;
+    ended?: boolean;
+  };
+}
+
+interface MusicBrainzArtistSearchResponse {
+  artists: MusicBrainzArtist[];
+}
+
+interface MusicBrainzReleaseGroup {
+  id: string;
+  title: string;
+  disambiguation?: string;
+  'primary-type'?: string;
+  'secondary-types'?: string[];
+  'first-release-date'?: string;
+}
+
+interface MusicBrainzReleaseGroupResponse {
+  'release-groups': MusicBrainzReleaseGroup[];
+}
+
 const searchCategorySchema = z.enum(['movies', 'tv', 'music']);
+const musicReleaseGroupsQuerySchema = z.object({
+  artistId: z.string().trim().min(1),
+});
 
 const jackettSearchSchema = z.object({
   category: searchCategorySchema,
@@ -135,6 +164,8 @@ const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const JACKETT_CAPS_CACHE_MS = 5 * 60 * 1000;
 const jackettCapsCache = new Map<string, { expiresAt: number; caps: JackettCaps }>();
 const commonLanguageCodes = ['en', 'de', 'fr', 'es', 'it', 'pt', 'nl', 'ru', 'ja', 'ko', 'zh', 'multi'];
+const DEFAULT_MUSICBRAINZ_BASE_URL = 'https://musicbrainz.org';
+const DEFAULT_MUSICBRAINZ_USER_AGENT = 'SoLaRi/1.0 (admin@localhost)';
 
 function normalizeTitle(value: string): string {
   return value.trim().toLowerCase();
@@ -172,6 +203,65 @@ async function getSettingValue(key: string): Promise<string | null> {
 
 async function getTmdbApiKey(): Promise<string | null> {
   return getSettingValue('apis.tmdb.apiKey');
+}
+
+async function resolveMusicBrainzConfig(): Promise<{ baseUrl: string; userAgent: string }> {
+  const baseUrl = await getSettingValue('apis.musicbrainz.baseUrl') || DEFAULT_MUSICBRAINZ_BASE_URL;
+  const userAgent = await getSettingValue('apis.musicbrainz.userAgent') || DEFAULT_MUSICBRAINZ_USER_AGENT;
+
+  return { baseUrl, userAgent };
+}
+
+function buildMusicBrainzEndpoint(baseUrl: string, path: string, params: Record<string, string>): URL {
+  const withScheme = /^https?:\/\//i.test(baseUrl)
+    ? baseUrl
+    : `https://${baseUrl}`;
+
+  const base = new URL(withScheme);
+  const cleanBasePath = base.pathname.replace(/\/+$/, '');
+
+  // Accept both `https://musicbrainz.org` and `https://musicbrainz.org/ws/2/`.
+  if (cleanBasePath.length === 0 || cleanBasePath === '/') {
+    base.pathname = '/ws/2/';
+  } else if (/\/ws\/2$/i.test(cleanBasePath)) {
+    base.pathname = `${cleanBasePath}/`;
+  } else {
+    base.pathname = `${cleanBasePath}/ws/2/`;
+  }
+
+  const resourcePath = path
+    .trim()
+    .replace(/^\/+/, '')
+    .replace(/^ws\/2\/?/i, '');
+
+  const endpoint = new URL(resourcePath, base);
+  for (const [key, value] of Object.entries(params)) {
+    endpoint.searchParams.set(key, value);
+  }
+  endpoint.searchParams.set('fmt', 'json');
+  return endpoint;
+}
+
+async function fetchMusicBrainzJson<T>(
+  path: string,
+  params: Record<string, string>,
+): Promise<T> {
+  const config = await resolveMusicBrainzConfig();
+  const endpoint = buildMusicBrainzEndpoint(config.baseUrl, path, params);
+
+  const response = await fetch(endpoint, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': config.userAgent,
+    },
+    signal: AbortSignal.timeout(12000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`MusicBrainz responded with HTTP ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
 }
 
 function parseMediaTypes(value: string): StoredMediaType[] {
@@ -343,31 +433,82 @@ async function searchTvInTmdb(query: string, apiKey: string): Promise<SearchResu
   }));
 }
 
-async function searchMusicInTmdb(query: string, apiKey: string): Promise<SearchResult[]> {
-  const payload = await fetchTmdbJson<TmdbSearchResponse<TmdbPersonResult>>(
-    'search/person',
-    apiKey,
+function describeArtist(artist: MusicBrainzArtist): string | null {
+  const parts: string[] = [];
+  if (artist.disambiguation) parts.push(artist.disambiguation);
+  if (artist.country) parts.push(`Country: ${artist.country}`);
+
+  const life = artist['life-span'];
+  const begin = life?.begin?.trim();
+  const end = life?.end?.trim();
+  if (begin && end) {
+    parts.push(`Active: ${begin} to ${end}`);
+  } else if (begin) {
+    parts.push(`Active since ${begin}`);
+  }
+
+  if (parts.length === 0) return null;
+  return parts.join(' | ');
+}
+
+function bestArtistTag(artist: MusicBrainzArtist): string | null {
+  if (!Array.isArray(artist.tags) || artist.tags.length === 0) return null;
+
+  const sorted = [...artist.tags]
+    .filter((tag) => typeof tag.name === 'string' && tag.name.trim().length > 0)
+    .sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
+
+  return sorted[0]?.name?.trim() || null;
+}
+
+async function searchArtistsInMusicBrainz(query: string): Promise<SearchResult[]> {
+  const payload = await fetchMusicBrainzJson<MusicBrainzArtistSearchResponse>(
+    'artist',
     {
       query,
-      include_adult: 'false',
-      language: 'en-US',
-      page: '1',
+      limit: '20',
+      offset: '0',
     },
   );
 
-  return payload.results
-    .filter((person) => person.known_for_department?.toLowerCase() === 'sound')
-    .slice(0, 20)
-    .map((person) => ({
-      id: `tmdb:person:${person.id}`,
-      title: person.name || 'Unknown Artist',
-      overview: null,
-      posterPath: buildTmdbImage(person.profile_path),
-      genre: person.known_for_department || 'Sound',
+  return (payload.artists || [])
+    .filter((artist) => typeof artist.id === 'string' && artist.id.length > 0)
+    .map((artist) => ({
+      id: `musicbrainz:artist:${artist.id}`,
+      title: artist.name || 'Unknown Artist',
+      overview: describeArtist(artist),
+      genre: bestArtistTag(artist) || undefined,
+      releaseDate: artist['life-span']?.begin || null,
+      year: deriveYear(artist['life-span']?.begin),
       inLibrary: false,
-      source: 'tmdb',
-      tmdbId: person.id,
+      source: 'musicbrainz',
+      musicBrainzId: artist.id,
     }));
+}
+
+async function fetchArtistReleaseGroups(artistId: string): Promise<MusicBrainzReleaseGroup[]> {
+  const payload = await fetchMusicBrainzJson<MusicBrainzReleaseGroupResponse>(
+    'release-group',
+    {
+      artist: artistId,
+      limit: '100',
+      offset: '0',
+    },
+  );
+
+  return (payload['release-groups'] || [])
+    .filter((releaseGroup) => (
+      typeof releaseGroup.id === 'string'
+      && releaseGroup.id.length > 0
+      && typeof releaseGroup.title === 'string'
+      && releaseGroup.title.trim().length > 0
+    ))
+    .sort((a, b) => {
+      const dateA = a['first-release-date'] ? Date.parse(a['first-release-date']) : 0;
+      const dateB = b['first-release-date'] ? Date.parse(b['first-release-date']) : 0;
+      if (dateA !== dateB) return dateB - dateA;
+      return a.title.localeCompare(b.title);
+    });
 }
 
 function decodeXmlEntities(value: string): string {
@@ -590,9 +731,11 @@ function parseJackettItems(xml: string, indexerConfig: ResolvedIndexer): Jackett
     const title = readTagText(itemXml, 'title');
     if (!title) continue;
 
-    const link = readTagText(itemXml, 'link') || parseEnclosureUrl(itemXml) || attributes.downloadurl || null;
-    const infoUrl = readTagText(itemXml, 'comments') || null;
-    const guid = readTagText(itemXml, 'guid') || link || `${indexerConfig.id}:${title}`;
+    const enclosureUrl = parseEnclosureUrl(itemXml);
+    const linkUrl = readTagText(itemXml, 'link');
+    const downloadUrl = enclosureUrl || attributes.downloadurl || attributes.magneturl || linkUrl || null;
+    const infoUrl = readTagText(itemXml, 'comments') || linkUrl || null;
+    const guid = readTagText(itemXml, 'guid') || downloadUrl || `${indexerConfig.id}:${title}`;
     const publishedAt = readTagText(itemXml, 'pubDate');
     const publishDate = publishedAt ? new Date(publishedAt) : null;
     const categoryNames = readAllTagText(itemXml, 'category');
@@ -606,7 +749,7 @@ function parseJackettItems(xml: string, indexerConfig: ResolvedIndexer): Jackett
       title,
       indexerId: indexerConfig.id,
       indexerName: indexerConfig.name,
-      downloadUrl: link,
+      downloadUrl,
       infoUrl,
       guid,
       size,
@@ -782,21 +925,34 @@ searchRoutes.get('/music', async (c) => {
   const query = readSearchQuery(c.req.query('q'));
   if (!query) return c.json({ error: 'Query parameter required' }, 400);
 
-  const apiKey = await getTmdbApiKey();
-  if (!apiKey) {
-    return c.json({ error: 'TMDB API key not configured. Set it in Settings > Advanced > TMDB API Key.' }, 400);
-  }
-
   try {
-    const tmdbResults = await searchMusicInTmdb(query, apiKey);
-    const results = await markLibraryMatches('music', tmdbResults);
+    const artistResults = await searchArtistsInMusicBrainz(query);
+    const results = await markLibraryMatches('music', artistResults);
     return c.json({
       query,
       results,
-      message: 'Results are from TMDB people search (Sound department) and marked if already in your library',
+      message: 'Results are from MusicBrainz artist search and marked if already in your library',
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'TMDB search failed';
+    const message = error instanceof Error ? error.message : 'MusicBrainz search failed';
+    return c.json({ error: message }, 502);
+  }
+});
+
+searchRoutes.get('/music/releases', async (c) => {
+  const parsed = musicReleaseGroupsQuerySchema.safeParse({
+    artistId: c.req.query('artistId'),
+  });
+
+  if (!parsed.success) {
+    return c.json({ error: 'artistId query parameter is required' }, 400);
+  }
+
+  try {
+    const releases = await fetchArtistReleaseGroups(parsed.data.artistId);
+    return c.json({ artistId: parsed.data.artistId, releases });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'MusicBrainz release lookup failed';
     return c.json({ error: message }, 502);
   }
 });

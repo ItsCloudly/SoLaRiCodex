@@ -74,12 +74,12 @@ async function resolveDelugeConnectionConfig(): Promise<{ host: string; port: nu
   }
 
   if (!password) {
-    throw new Error('Deluge password is not configured in Settings > Download Client');
+    throw new Error('Deluge Web UI password is not configured in Settings > Download Client');
   }
 
   const parsedPort = portRaw ? Number.parseInt(portRaw, 10) : 8112;
   if (!Number.isInteger(parsedPort) || parsedPort <= 0) {
-    throw new Error('Deluge port is invalid in Settings > Download Client');
+    throw new Error('Deluge Web UI port is invalid in Settings > Download Client');
   }
 
   return {
@@ -186,7 +186,7 @@ async function tryAddToDelugeEndpoint(
 
   const authenticated = await callDelugeRpc<boolean>(session, 'auth.login', [password]);
   if (!authenticated) {
-    throw new Error('Deluge authentication failed');
+    throw new Error('Deluge authentication failed (use your Web UI password, not daemon credentials)');
   }
 
   await ensureDelugeConnected(session);
