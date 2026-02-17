@@ -1,26 +1,31 @@
 import { createAsync } from '@solidjs/router';
+import { createEffect, createSignal } from 'solid-js';
 import MainLayout from '~/components/layout/MainLayout';
 import { Card, CardHeader, CardTitle, Badge, Progress, Button } from '~/components/ui';
 import { Activity, Pause, Play, X, Download, Clock, HardDrive } from 'lucide-solid';
-import { getApiUrl } from '~/lib/api';
+import { fetchJson, requestJson } from '~/lib/api';
 
-const fetchDownloads = async () => {
-  try {
-    const res = await fetch(getApiUrl('/api/downloads'));
-    const contentType = res.headers.get('content-type') || '';
-    if (!res.ok || !contentType.includes('application/json')) return [];
-    return await res.json();
-  } catch {
-    return [];
-  }
-};
+const fetchDownloads = () => fetchJson<any[]>('/api/downloads');
 
 export default function ActivityPage() {
-  const downloads = createAsync(fetchDownloads);
+  const downloadsResult = createAsync(fetchDownloads);
 
-  const activeDownloads = () => downloads()?.filter((d: any) => ['downloading', 'queued', 'paused'].includes(d.status)) || [];
-  const completedDownloads = () => downloads()?.filter((d: any) => d.status === 'completed') || [];
-  const failedDownloads = () => downloads()?.filter((d: any) => d.status === 'failed') || [];
+  const [downloads, setDownloads] = createSignal<any[]>([]);
+  const [actionError, setActionError] = createSignal<string | null>(null);
+  const [activeActionId, setActiveActionId] = createSignal<number | null>(null);
+
+  createEffect(() => {
+    const payload = downloadsResult();
+    if (payload?.data) {
+      setDownloads(payload.data);
+    }
+  });
+
+  const loadError = () => downloadsResult()?.error;
+
+  const activeDownloads = () => downloads().filter((d: any) => ['downloading', 'queued', 'paused'].includes(d.status));
+  const completedDownloads = () => downloads().filter((d: any) => d.status === 'completed');
+  const failedDownloads = () => downloads().filter((d: any) => d.status === 'failed');
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -42,6 +47,49 @@ export default function ActivityPage() {
     }
   };
 
+  async function togglePause(download: any) {
+    setActionError(null);
+    setActiveActionId(download.id);
+
+    const nextStatus = download.status === 'paused' ? 'downloading' : 'paused';
+    const result = await requestJson<{ message: string }>(`/api/downloads/${download.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: nextStatus }),
+    });
+
+    if (result.error) {
+      setActionError(result.error);
+      setActiveActionId(null);
+      return;
+    }
+
+    setDownloads((prev) => prev.map((item) => (
+      item.id === download.id
+        ? { ...item, status: nextStatus }
+        : item
+    )));
+    setActiveActionId(null);
+  }
+
+  async function cancelDownload(download: any) {
+    setActionError(null);
+    setActiveActionId(download.id);
+
+    const result = await requestJson<{ message: string }>(`/api/downloads/${download.id}`, {
+      method: 'DELETE',
+    });
+
+    if (result.error) {
+      setActionError(result.error);
+      setActiveActionId(null);
+      return;
+    }
+
+    setDownloads((prev) => prev.filter((item) => item.id !== download.id));
+    setActiveActionId(null);
+  }
+
   return (
     <MainLayout>
       <div class="activity-page">
@@ -50,8 +98,19 @@ export default function ActivityPage() {
           <h1 class="section-title">Activity</h1>
         </header>
 
+        {loadError() && (
+          <Card>
+            <p>Failed to load downloads: {loadError()}</p>
+          </Card>
+        )}
+
+        {actionError() && (
+          <Card>
+            <p>Action failed: {actionError()}</p>
+          </Card>
+        )}
+
         <div class="activity-grid">
-          {/* Active Downloads */}
           <Card class="activity-section">
             <CardHeader>
               <CardTitle>Active Downloads</CardTitle>
@@ -65,15 +124,25 @@ export default function ActivityPage() {
                   <p>No active downloads</p>
                 </div>
               ) : (
-activeDownloads().map((download: any) => (
+                activeDownloads().map((download: any) => (
                   <div class="download-item">
                     <div class="download-header">
                       <div class="download-title">{download.title}</div>
                       <div class="download-actions">
-                        <Button variant="ghost" size="sm">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void togglePause(download)}
+                          disabled={activeActionId() === download.id}
+                        >
                           {download.status === 'paused' ? <Play size={16} /> : <Pause size={16} />}
                         </Button>
-                        <Button variant="ghost" size="sm">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void cancelDownload(download)}
+                          disabled={activeActionId() === download.id}
+                        >
                           <X size={16} />
                         </Button>
                       </div>
@@ -102,7 +171,6 @@ activeDownloads().map((download: any) => (
             </div>
           </Card>
 
-          {/* Completed */}
           <Card class="activity-section">
             <CardHeader>
               <CardTitle>Completed</CardTitle>
@@ -116,7 +184,7 @@ activeDownloads().map((download: any) => (
                   <p>No completed downloads</p>
                 </div>
               ) : (
-completedDownloads().slice(0, 10).map((download: any) => (
+                completedDownloads().slice(0, 10).map((download: any) => (
                   <div class="download-item compact">
                     <div class="download-title">{download.title}</div>
                     <div class="download-meta">
@@ -129,7 +197,6 @@ completedDownloads().slice(0, 10).map((download: any) => (
             </div>
           </Card>
 
-          {/* Failed */}
           <Card class="activity-section">
             <CardHeader>
               <CardTitle>Failed</CardTitle>
@@ -143,7 +210,7 @@ completedDownloads().slice(0, 10).map((download: any) => (
                   <p>No failed downloads</p>
                 </div>
               ) : (
-failedDownloads().map((download: any) => (
+                failedDownloads().map((download: any) => (
                   <div class="download-item compact">
                     <div class="download-title">{download.title}</div>
                     <div class="download-meta">
@@ -175,7 +242,7 @@ function formatSize(bytes: number | undefined): string {
 
 function formatSpeed(bytesPerSecond: number | undefined): string {
   if (!bytesPerSecond) return '0 B/s';
-  return formatSize(bytesPerSecond) + '/s';
+  return `${formatSize(bytesPerSecond)}/s`;
 }
 
 function formatETA(seconds: number | undefined): string {

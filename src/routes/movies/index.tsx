@@ -2,35 +2,28 @@ import { createAsync } from '@solidjs/router';
 import MainLayout from '~/components/layout/MainLayout';
 import { Card, Button, Badge } from '~/components/ui';
 import { Film, Plus, Search, Filter } from 'lucide-solid';
-import { getApiUrl } from '~/lib/api';
+import { fetchJson } from '~/lib/api';
 
-const fetchMovies = async () => {
-  try {
-    const res = await fetch(getApiUrl('/api/media/movies'));
-    const contentType = res.headers.get('content-type') || '';
-    if (!res.ok || !contentType.includes('application/json')) return [];
-    return await res.json();
-  } catch {
-    return [];
-  }
-};
+const fetchMovies = () => fetchJson<any[]>('/api/media/movies');
 
 export default function Movies() {
-  const movies = createAsync(fetchMovies);
+  const moviesResult = createAsync(fetchMovies);
+
+  const movies = () => moviesResult()?.data ?? [];
+  const error = () => moviesResult()?.error;
 
   return (
     <MainLayout>
       <div class="movies-page">
-        {/* Header */}
         <header class="page-header">
           <div class="header-title">
             <Film size={28} class="header-icon" />
             <div>
               <h1 class="section-title">Movies</h1>
-              <p class="header-subtitle">{movies()?.length || 0} titles in library</p>
+              <p class="header-subtitle">{movies().length} titles in library</p>
             </div>
           </div>
-          
+
           <div class="header-actions">
             <div class="search-box">
               <Search size={18} />
@@ -40,7 +33,7 @@ export default function Movies() {
               <Filter size={18} />
               Filter
             </Button>
-            
+
             <Button variant="primary">
               <Plus size={18} />
               Add Movie
@@ -48,9 +41,14 @@ export default function Movies() {
           </div>
         </header>
 
-        {/* Movies Grid */}
+        {error() && (
+          <Card>
+            <p>Failed to load movies: {error()}</p>
+          </Card>
+        )}
+
         <div class="movies-grid">
-          {movies()?.length === 0 ? (
+          {movies().length === 0 ? (
             <div class="empty-state">
               <Film size={64} />
               <h3>No movies yet</h3>
@@ -61,7 +59,7 @@ export default function Movies() {
               </Button>
             </div>
           ) : (
-            movies()?.map((movie: any) => (
+            movies().map((movie: any) => (
               <Card class="movie-card" key={movie.id}>
                 <div class="movie-poster">
                   {movie.posterPath ? (
@@ -77,7 +75,7 @@ export default function Movies() {
                     </Badge>
                   </div>
                 </div>
-                
+
                 <div class="movie-info">
                   <h3 class="movie-title">{movie.title}</h3>
                   <p class="movie-meta">
@@ -93,4 +91,3 @@ export default function Movies() {
     </MainLayout>
   );
 }
-

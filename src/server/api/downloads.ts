@@ -3,13 +3,9 @@ import { z } from 'zod';
 import { db } from '../db/connection';
 import { downloads } from '../db/schema';
 import { eq, desc } from 'drizzle-orm';
+import { parseIdParam } from './utils';
 
 export const downloadsRoutes = new Hono();
-
-function parseId(value: string): number | null {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 // Get all downloads
 downloadsRoutes.get('/', async (c) => {
@@ -77,28 +73,35 @@ downloadsRoutes.post('/', async (c) => {
 
 // Update download progress
 downloadsRoutes.patch('/:id', async (c) => {
-  const id = parseId(c.req.param('id'));
+  const id = parseIdParam(c.req.param('id'));
   if (id === null) return c.json({ error: 'Invalid download id' }, 400);
 
   const body = await c.req.json();
   const data = updateDownloadSchema.parse(body);
   
-  await db.update(downloads)
+  const updated = await db.update(downloads)
     .set({
       ...data,
       completedAt: data.completedAt ? new Date(data.completedAt) : undefined,
     })
-    .where(eq(downloads.id, id));
+    .where(eq(downloads.id, id))
+    .returning({ id: downloads.id });
+
+  if (updated.length === 0) return c.json({ error: 'Download not found' }, 404);
   
   return c.json({ message: 'Download updated' });
 });
 
 // Delete download
 downloadsRoutes.delete('/:id', async (c) => {
-  const id = parseId(c.req.param('id'));
+  const id = parseIdParam(c.req.param('id'));
   if (id === null) return c.json({ error: 'Invalid download id' }, 400);
   
-  await db.delete(downloads).where(eq(downloads.id, id));
+  const removed = await db.delete(downloads)
+    .where(eq(downloads.id, id))
+    .returning({ id: downloads.id });
+
+  if (removed.length === 0) return c.json({ error: 'Download not found' }, 404);
   
   return c.json({ message: 'Download removed' });
 });

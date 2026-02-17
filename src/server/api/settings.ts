@@ -38,27 +38,30 @@ const updateSettingsSchema = z.record(z.string(), z.any());
 settingsRoutes.put('/', async (c) => {
   const body = await c.req.json();
   const data = updateSettingsSchema.parse(body);
-  
-  for (const [key, value] of Object.entries(data)) {
-    let type: SettingType = 'string';
-    let stringValue = String(value);
-    
-    if (typeof value === 'number') {
-      type = 'number';
-    } else if (typeof value === 'boolean') {
-      type = 'boolean';
-    } else if (typeof value === 'object') {
-      type = 'json';
-      stringValue = JSON.stringify(value);
+
+  db.transaction((tx) => {
+    for (const [key, value] of Object.entries(data)) {
+      let type: SettingType = 'string';
+      let stringValue = String(value);
+
+      if (typeof value === 'number') {
+        type = 'number';
+      } else if (typeof value === 'boolean') {
+        type = 'boolean';
+      } else if (typeof value === 'object' && value !== null) {
+        type = 'json';
+        stringValue = JSON.stringify(value);
+      }
+
+      tx.insert(settings)
+        .values({ key, value: stringValue, type })
+        .onConflictDoUpdate({
+          target: settings.key,
+          set: { value: stringValue, type, updatedAt: new Date() },
+        })
+        .run();
     }
-    
-    await db.insert(settings)
-      .values({ key, value: stringValue, type })
-      .onConflictDoUpdate({
-        target: settings.key,
-        set: { value: stringValue, type, updatedAt: new Date() },
-      });
-  }
+  });
   
   return c.json({ message: 'Settings updated' });
 });

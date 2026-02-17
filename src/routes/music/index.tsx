@@ -2,56 +2,52 @@ import { createAsync } from '@solidjs/router';
 import MainLayout from '~/components/layout/MainLayout';
 import { Card, Button, Badge } from '~/components/ui';
 import { Music, Plus, Search, Filter, Disc } from 'lucide-solid';
-import { getApiUrl } from '~/lib/api';
+import { fetchJson } from '~/lib/api';
 
-const fetchArtists = async () => {
-  try {
-    const res = await fetch(getApiUrl('/api/media/music/artists'));
-    const contentType = res.headers.get('content-type') || '';
-    if (!res.ok || !contentType.includes('application/json')) return [];
-    return await res.json();
-  } catch {
-    return [];
-  }
-};
+const fetchArtists = () => fetchJson<any[]>('/api/media/music/artists');
 
 export default function MusicPage() {
-  const artists = createAsync(fetchArtists);
+  const artistsResult = createAsync(fetchArtists);
+
+  const artists = () => artistsResult()?.data ?? [];
+  const error = () => artistsResult()?.error;
 
   return (
     <MainLayout>
       <div class="music-page">
-        {/* Header */}
         <header class="page-header">
-          <div class="header-title">
-            <Music size={28} class="header-icon" />
-            <div>
-              <h1 class="section-title">Music</h1>
-              <p class="header-subtitle">{artists()?.length || 0} artists in library</p>
-            </div>
-          </div>
-          
-          <div class="header-actions">
-            <div class="search-box">
-              <Search size={18} />
-              <input type="text" placeholder="Search artists..." class="input" />
-            </div>
-            
-            <Button variant="ghost">
-              <Filter size={18} />
-              Filter
-            </Button>
-            
-            <Button variant="primary">
-              <Plus size={18} />
-              Add Artist
-            </Button>
+          <Music size={28} class="header-icon" />
+          <div>
+            <h1 class="section-title">Music</h1>
+            <p class="header-subtitle">{artists().length} artists in library</p>
           </div>
         </header>
 
-        {/* Artists Grid */}
+        <div class="header-actions">
+          <div class="search-box">
+            <Search size={18} />
+            <input type="text" placeholder="Search artists..." class="input" />
+          </div>
+
+          <Button variant="ghost">
+            <Filter size={18} />
+            Filter
+          </Button>
+
+          <Button variant="primary">
+            <Plus size={18} />
+            Add Artist
+          </Button>
+        </div>
+
+        {error() && (
+          <Card>
+            <p>Failed to load artists: {error()}</p>
+          </Card>
+        )}
+
         <div class="artists-grid">
-          {artists()?.length === 0 ? (
+          {artists().length === 0 ? (
             <div class="empty-state">
               <Disc size={64} />
               <h3>No music yet</h3>
@@ -62,7 +58,7 @@ export default function MusicPage() {
               </Button>
             </div>
           ) : (
-            artists()?.map((artist: any) => (
+            artists().map((artist: any) => (
               <Card class="artist-card" key={artist.id}>
                 <div class="artist-image">
                   {artist.posterPath ? (
@@ -78,7 +74,7 @@ export default function MusicPage() {
                     </Badge>
                   </div>
                 </div>
-                
+
                 <div class="artist-info">
                   <h3 class="artist-name">{artist.title}</h3>
                   <p class="artist-genre">{artist.genre || 'Unknown Genre'}</p>

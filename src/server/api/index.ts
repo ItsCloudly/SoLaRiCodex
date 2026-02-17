@@ -9,6 +9,7 @@ import { indexersRoutes } from './indexers';
 import { qualityRoutes } from './quality';
 import { settingsRoutes } from './settings';
 import { delugeRoutes } from './deluge';
+import { ZodError } from 'zod';
 
 const app = new Hono();
 
@@ -27,5 +28,16 @@ app.route('/deluge', delugeRoutes);
 
 // Health check
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
+
+app.notFound((c) => c.json({ error: 'Not found' }, 404));
+
+app.onError((error, c) => {
+  if (error instanceof ZodError) {
+    return c.json({ error: 'Invalid request payload', details: error.issues }, 400);
+  }
+
+  console.error('API error:', error);
+  return c.json({ error: 'Internal server error' }, 500);
+});
 
 export default app;

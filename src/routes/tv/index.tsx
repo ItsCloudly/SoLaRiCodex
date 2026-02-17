@@ -2,46 +2,39 @@ import { createAsync } from '@solidjs/router';
 import MainLayout from '~/components/layout/MainLayout';
 import { Card, Button, Badge } from '~/components/ui';
 import { Tv, Plus, Search, Filter } from 'lucide-solid';
-import { getApiUrl } from '~/lib/api';
+import { fetchJson } from '~/lib/api';
 
-const fetchSeries = async () => {
-  try {
-    const res = await fetch(getApiUrl('/api/media/tv'));
-    const contentType = res.headers.get('content-type') || '';
-    if (!res.ok || !contentType.includes('application/json')) return [];
-    return await res.json();
-  } catch {
-    return [];
-  }
-};
+const fetchSeries = () => fetchJson<any[]>('/api/media/tv');
 
 export default function TVShows() {
-  const series = createAsync(fetchSeries);
+  const seriesResult = createAsync(fetchSeries);
+
+  const series = () => seriesResult()?.data ?? [];
+  const error = () => seriesResult()?.error;
 
   return (
     <MainLayout>
       <div class="tv-page">
-        {/* Header */}
         <header class="page-header">
           <div class="header-title">
             <Tv size={28} class="header-icon" />
             <div>
               <h1 class="section-title">TV Shows</h1>
-              <p class="header-subtitle">{series()?.length || 0} series in library</p>
+              <p class="header-subtitle">{series().length} series in library</p>
             </div>
           </div>
-          
+
           <div class="header-actions">
             <div class="search-box">
               <Search size={18} />
               <input type="text" placeholder="Search TV shows..." class="input" />
             </div>
-            
+
             <Button variant="ghost">
               <Filter size={18} />
               Filter
             </Button>
-            
+
             <Button variant="primary">
               <Plus size={18} />
               Add Series
@@ -49,9 +42,14 @@ export default function TVShows() {
           </div>
         </header>
 
-        {/* Series Grid */}
+        {error() && (
+          <Card>
+            <p>Failed to load TV series: {error()}</p>
+          </Card>
+        )}
+
         <div class="series-grid">
-          {series()?.length === 0 ? (
+          {series().length === 0 ? (
             <div class="empty-state">
               <Tv size={64} />
               <h3>No TV shows yet</h3>
@@ -62,7 +60,7 @@ export default function TVShows() {
               </Button>
             </div>
           ) : (
-            series()?.map((show: any) => (
+            series().map((show: any) => (
               <Card class="series-card" key={show.id}>
                 <div class="series-poster">
                   {show.posterPath ? (
@@ -78,7 +76,7 @@ export default function TVShows() {
                     </Badge>
                   </div>
                 </div>
-                
+
                 <div class="series-info">
                   <h3 class="series-title">{show.title}</h3>
                   <p class="series-meta">
