@@ -8,4 +8,5 @@ CREATE TABLE `track_lyrics` (
   `updated_at` integer DEFAULT (CURRENT_TIMESTAMP),
   FOREIGN KEY (`track_id`) REFERENCES `tracks`(`id`) ON UPDATE no action ON DELETE no action
 );
+--> statement-breakpoint
 CREATE UNIQUE INDEX `track_lyrics_track_id_unique` ON `track_lyrics` (`track_id`);

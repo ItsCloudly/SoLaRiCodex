@@ -146,6 +146,20 @@ interface LrcFetchResult {
 const mediaDurationCache = new Map<string, DurationCacheEntry>();
 const MEDIA_DURATION_CACHE_TTL_MS = 1000 * 60 * 30;
 
+function normalizeLyricsQuery(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const cleaned = input
+    .replace(/\(([^)]+)\)/g, ' ')
+    .replace(/\[([^\]]+)\]/g, ' ')
+    .replace(/feat\.?|featuring/gi, ' ')
+    .replace(/[\-_]+/g, ' ')
+    .replace(/\b(flac|mp3|aac|wav|remaster(?:ed)?|deluxe|expanded|anniversary|mono|stereo|edition)\b/gi, ' ')
+    .replace(/[^\p{L}\p{N}\s'&.-]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > 0 ? cleaned : null;
+}
+
 async function fetchSyncedLyricsFromLrclib(params: {
   trackTitle: string | null;
   artistName: string | null;
@@ -158,34 +172,82 @@ async function fetchSyncedLyricsFromLrclib(params: {
 
   if (!trackTitle || !artistName) return null;
 
-  const url = new URL(LRCLIB_BASE_URL);
-  url.searchParams.set('track_name', trackTitle);
-  url.searchParams.set('artist_name', artistName);
-  if (albumTitle) {
-    url.searchParams.set('album_name', albumTitle);
+  const normalizedTrack = normalizeLyricsQuery(trackTitle);
+  const normalizedArtist = normalizeLyricsQuery(artistName);
+  const normalizedAlbum = normalizeLyricsQuery(albumTitle);
+
+  const duration = (
+    typeof params.durationSeconds === 'number'
+    && Number.isFinite(params.durationSeconds)
+    && params.durationSeconds > 0
+  )
+    ? String(Math.round(params.durationSeconds))
+    : null;
+
+  const candidates: Array<{ track: string; artist: string; album?: string | null }> = [];
+  candidates.push({ track: trackTitle, artist: artistName, album: albumTitle || null });
+  candidates.push({ track: trackTitle, artist: artistName, album: null });
+  if (normalizedTrack && normalizedTrack !== trackTitle) {
+    candidates.push({ track: normalizedTrack, artist: artistName, album: albumTitle || null });
+    candidates.push({ track: normalizedTrack, artist: artistName, album: null });
   }
-  if (typeof params.durationSeconds === 'number' && Number.isFinite(params.durationSeconds) && params.durationSeconds > 0) {
-    url.searchParams.set('duration', String(Math.round(params.durationSeconds)));
+  if (normalizedArtist && normalizedArtist !== artistName) {
+    candidates.push({ track: trackTitle, artist: normalizedArtist, album: albumTitle || null });
+    candidates.push({ track: trackTitle, artist: normalizedArtist, album: null });
+  }
+  if (normalizedTrack && normalizedArtist) {
+    candidates.push({ track: normalizedTrack, artist: normalizedArtist, album: normalizedAlbum || null });
+    candidates.push({ track: normalizedTrack, artist: normalizedArtist, album: null });
+  }
+  if (normalizedAlbum && normalizedAlbum !== albumTitle) {
+    candidates.push({ track: trackTitle, artist: artistName, album: normalizedAlbum });
+    if (normalizedArtist && normalizedArtist !== artistName) {
+      candidates.push({ track: trackTitle, artist: normalizedArtist, album: normalizedAlbum });
+    }
+    if (normalizedTrack && normalizedTrack !== trackTitle) {
+      candidates.push({ track: normalizedTrack, artist: artistName, album: normalizedAlbum });
+    }
   }
 
-  const response = await fetch(url, { signal: AbortSignal.timeout(12000) });
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    throw new Error(`Lyrics provider failed (${response.status})`);
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const key = `${candidate.track}|${candidate.artist}|${candidate.album ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const url = new URL(LRCLIB_BASE_URL);
+    url.searchParams.set('track_name', candidate.track);
+    url.searchParams.set('artist_name', candidate.artist);
+    if (candidate.album) {
+      url.searchParams.set('album_name', candidate.album);
+    }
+    if (duration) {
+      url.searchParams.set('duration', duration);
+    }
+
+    const response = await fetch(url, { signal: AbortSignal.timeout(12000) });
+    if (response.status === 404) {
+      continue;
+    }
+    if (!response.ok) {
+      throw new Error(`Lyrics provider failed (${response.status})`);
+    }
+
+    const payload = await response.json();
+    if (!payload || typeof payload !== 'object') return null;
+
+    const syncedLyrics = typeof payload.syncedLyrics === 'string' ? payload.syncedLyrics.trim() : '';
+    const plainLyrics = typeof payload.plainLyrics === 'string' ? payload.plainLyrics.trim() : '';
+    const sourceId = payload.id ? String(payload.id) : null;
+
+    return {
+      syncedLrc: syncedLyrics.length > 0 ? syncedLyrics : null,
+      plainLyrics: plainLyrics.length > 0 ? plainLyrics : null,
+      sourceId,
+    };
   }
 
-  const payload = await response.json();
-  if (!payload || typeof payload !== 'object') return null;
-
-  const syncedLyrics = typeof payload.syncedLyrics === 'string' ? payload.syncedLyrics.trim() : '';
-  const plainLyrics = typeof payload.plainLyrics === 'string' ? payload.plainLyrics.trim() : '';
-  const sourceId = payload.id ? String(payload.id) : null;
-
-  return {
-    syncedLrc: syncedLyrics.length > 0 ? syncedLyrics : null,
-    plainLyrics: plainLyrics.length > 0 ? plainLyrics : null,
-    sourceId,
-  };
+  return null;
 }
 
 async function getSettingValue(key: string): Promise<string | null> {
@@ -2979,7 +3041,7 @@ mediaRoutes.get('/music/tracks/:id/lyrics', async (c) => {
     .where(eq(trackLyrics.trackId, id))
     .limit(1);
 
-  if (cachedLyrics[0]) {
+  if (cachedLyrics[0] && (cachedLyrics[0].syncedLrc || cachedLyrics[0].plainLyrics)) {
     return c.json({
       status: 'ok',
       source: 'cache',
