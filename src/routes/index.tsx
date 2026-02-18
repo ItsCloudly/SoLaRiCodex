@@ -26,7 +26,7 @@ export default function Dashboard() {
   };
 
   const statusCounts = createMemo(() => {
-    const rows = stats()?.downloads.byStatus || [];
+    const rows = stats()?.downloads?.byStatus || [];
     const counts = new Map<string, number>();
     for (const row of rows) {
       counts.set(row.status, row.count);
@@ -40,8 +40,8 @@ export default function Dashboard() {
     };
   });
 
-  const totalLibraryItems = createMemo(() => stats()?.library.total || 0);
-  const activeDownloads = createMemo(() => stats()?.downloads.active || []);
+  const totalLibraryItems = createMemo(() => stats()?.library?.total || 0);
+  const activeDownloads = createMemo(() => stats()?.downloads?.active || []);
   const shareOfLibrary = (value: number) => {
     const total = totalLibraryItems();
     if (total <= 0) return 0;
@@ -89,7 +89,7 @@ export default function Dashboard() {
               <Film size={24} />
             </div>
             <div class="stat-content">
-              <div class="stat-value">{stats()?.library.movies ?? 0}</div>
+              <div class="stat-value">{stats()?.library?.movies ?? 0}</div>
               <div class="stat-label">Movies</div>
             </div>
           </Card>
@@ -99,7 +99,7 @@ export default function Dashboard() {
               <Tv size={24} />
             </div>
             <div class="stat-content">
-              <div class="stat-value">{stats()?.library.tv ?? 0}</div>
+              <div class="stat-value">{stats()?.library?.tv ?? 0}</div>
               <div class="stat-label">TV Series</div>
             </div>
           </Card>
@@ -109,7 +109,7 @@ export default function Dashboard() {
               <Music size={24} />
             </div>
             <div class="stat-content">
-              <div class="stat-value">{stats()?.library.music ?? 0}</div>
+              <div class="stat-value">{stats()?.library?.music ?? 0}</div>
               <div class="stat-label">Albums</div>
             </div>
           </Card>
@@ -119,7 +119,7 @@ export default function Dashboard() {
               <Download size={24} />
             </div>
             <div class="stat-content">
-              <div class="stat-value">{stats()?.downloads.active.length ?? 0}</div>
+              <div class="stat-value">{activeDownloads().length}</div>
               <div class="stat-label">Active Downloads</div>
             </div>
           </Card>
@@ -143,19 +143,19 @@ export default function Dashboard() {
             <div class="library-mix-list">
               <div class="library-mix-row">
                 <span>Movies</span>
-                <span>{stats()?.library.movies ?? 0} ({shareOfLibrary(stats()?.library.movies ?? 0)}%)</span>
+                <span>{stats()?.library?.movies ?? 0} ({shareOfLibrary(stats()?.library?.movies ?? 0)}%)</span>
               </div>
-              <div class="library-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library.movies ?? 0)}%` }} /></div>
+              <div class="library-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library?.movies ?? 0)}%` }} /></div>
               <div class="library-mix-row">
                 <span>TV Series</span>
-                <span>{stats()?.library.tv ?? 0} ({shareOfLibrary(stats()?.library.tv ?? 0)}%)</span>
+                <span>{stats()?.library?.tv ?? 0} ({shareOfLibrary(stats()?.library?.tv ?? 0)}%)</span>
               </div>
-              <div class="library-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library.tv ?? 0)}%` }} /></div>
+              <div class="library-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library?.tv ?? 0)}%` }} /></div>
               <div class="library-mix-row">
                 <span>Albums</span>
-                <span>{stats()?.library.music ?? 0} ({shareOfLibrary(stats()?.library.music ?? 0)}%)</span>
+                <span>{stats()?.library?.music ?? 0} ({shareOfLibrary(stats()?.library?.music ?? 0)}%)</span>
               </div>
-              <div class="library-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library.music ?? 0)}%` }} /></div>
+              <div class="library-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library?.music ?? 0)}%` }} /></div>
             </div>
           </Card>
 

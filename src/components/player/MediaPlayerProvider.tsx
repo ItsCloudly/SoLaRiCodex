@@ -37,6 +37,7 @@ interface PlaybackProgressEntry {
 
 interface PlaybackProgressResponse {
   entry: PlaybackProgressEntry | null;
+  inferredDurationSeconds?: number | null;
 }
 
 interface PlaybackLibraryResponse {
@@ -123,11 +124,24 @@ export function MediaPlayerPanel() {
   const hasPrevious = createMemo(() => player.currentIndex() > 0);
   const hasNext = createMemo(() => player.currentIndex() < player.queue().length - 1);
   const isVideoMode = createMemo(() => player.currentItem()?.mediaType === 'video');
+  const currentPlaylistKind = createMemo<PlayerMediaKind | null>(() => {
+    const mediaKind = player.currentItem()?.mediaKind;
+    if (mediaKind === 'episode' || mediaKind === 'track') return mediaKind;
+    return null;
+  });
+  const showPlaylist = createMemo(() => currentPlaylistKind() !== null);
+  const playlistKindLabel = createMemo(() => (
+    currentPlaylistKind() === 'episode' ? 'shows' : 'music'
+  ));
   const showInlineControls = createMemo(() => !isVideoMode() || !isFullscreen());
   const filteredLibraryItems = createMemo(() => {
     const query = libraryQuery().trim().toLowerCase();
+    const allowedKind = currentPlaylistKind();
     const queuedIds = new Set(player.queue().map((item) => item.id));
-    const available = libraryItems().filter((item) => !queuedIds.has(item.id));
+    let available = libraryItems().filter((item) => !queuedIds.has(item.id));
+    if (allowedKind) {
+      available = available.filter((item) => item.mediaKind === allowedKind);
+    }
 
     if (query.length === 0) return available.slice(0, 80);
     return available
@@ -247,7 +261,8 @@ export function MediaPlayerPanel() {
 
     if (response.error || !response.data?.entry) {
       setResumeSeconds(null);
-      setSavedDurationSeconds(null);
+      const inferred = response.data?.inferredDurationSeconds;
+      setSavedDurationSeconds(typeof inferred === 'number' && inferred > 0 ? inferred : null);
       return;
     }
 
@@ -265,7 +280,9 @@ export function MediaPlayerPanel() {
     setSavedDurationSeconds(
       typeof response.data.entry.durationSeconds === 'number' && response.data.entry.durationSeconds > 0
         ? response.data.entry.durationSeconds
-        : null,
+        : (typeof response.data.inferredDurationSeconds === 'number' && response.data.inferredDurationSeconds > 0
+          ? response.data.inferredDurationSeconds
+          : null),
     );
     setResumeSeconds(savedSeconds);
   };
@@ -619,6 +636,89 @@ export function MediaPlayerPanel() {
     </div>
   );
 
+  const renderPlaylistSection = (mode: 'default' | 'side' = 'default') => (
+    <section class={`media-player-playlist-block ${mode === 'side' ? 'side' : ''}`}>
+      <div class="media-player-playlist-head">
+        <h4>Current Playlist</h4>
+        <span>{player.queue().length} item{player.queue().length === 1 ? '' : 's'}</span>
+      </div>
+      <div class="media-player-playlist-list">
+        {player.queue().map((item, index) => (
+          <button
+            type="button"
+            class={`media-player-playlist-item ${index === player.currentIndex() ? 'active' : ''}`}
+            onClick={() => void jumpToIndex(index)}
+          >
+            <span class="media-player-playlist-index">{String(index + 1).padStart(2, '0')}</span>
+            <span class="media-player-playlist-labels">
+              <span>{item.title}</span>
+              <Show when={item.subtitle}>
+                <small>{item.subtitle}</small>
+              </Show>
+              <Show when={index === player.currentIndex()}>
+                <small class="media-player-playlist-status">Now Playing</small>
+              </Show>
+              <Show when={index === player.currentIndex() + 1}>
+                <small class="media-player-playlist-status">Up Next</small>
+              </Show>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div class="media-player-playlist-add">
+        <div class="media-player-playlist-search-row">
+          <input
+            id="playlist-library-search"
+            class="input"
+            type="search"
+            value={libraryQuery()}
+            onInput={(event) => setLibraryQuery(event.currentTarget.value)}
+            placeholder={`Search ${playlistKindLabel()}...`}
+          />
+          <button
+            type="button"
+            class="media-player-icon-button"
+            onClick={() => void loadPlaybackLibrary()}
+            disabled={isLoadingLibrary()}
+          >
+            {isLoadingLibrary() ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+        <div class="media-player-library-results">
+          <Show
+            when={!isLoadingLibrary() && filteredLibraryItems().length > 0}
+            fallback={<></>}
+          >
+            {filteredLibraryItems().map((item) => (
+              <div class="media-player-library-item">
+                <div class="media-player-library-item-labels">
+                  <span>{item.title}</span>
+                  <Show when={item.subtitle}>
+                    <small>{item.subtitle}</small>
+                  </Show>
+                </div>
+                <button
+                  type="button"
+                  class="media-player-icon-button"
+                  onClick={() => addLibraryItemToPlaylist(item)}
+                >
+                  Add
+                </button>
+              </div>
+            ))}
+          </Show>
+        </div>
+        <Show when={libraryError()}>
+          <p class="media-player-error">{libraryError()}</p>
+        </Show>
+        <Show when={playlistFeedback()}>
+          <p class="media-player-playlist-feedback">{playlistFeedback()}</p>
+        </Show>
+      </div>
+    </section>
+  );
+
   onMount(() => {
     if (typeof window === 'undefined') return;
 
@@ -791,21 +891,26 @@ export function MediaPlayerPanel() {
           </Show>
 
           <Show when={player.currentItem()?.mediaType === 'audio'}>
-            <div class="media-player-audio-stage">
-              <Show
-                when={player.currentItem()?.artworkUrl && !artworkLoadFailed()}
-                fallback={(
-                  <div class="media-player-audio-artwork media-player-audio-artwork-fallback" aria-hidden="true">
-                    <Disc3 size={54} />
-                  </div>
-                )}
-              >
-                <img
-                  class="media-player-audio-artwork"
-                  src={player.currentItem()?.artworkUrl || ''}
-                  alt={`${player.currentItem()?.subtitle || player.currentItem()?.title || 'Album'} artwork`}
-                  onError={() => setArtworkLoadFailed(true)}
-                />
+            <div class="media-player-audio-layout">
+              <div class="media-player-audio-stage">
+                <Show
+                  when={player.currentItem()?.artworkUrl && !artworkLoadFailed()}
+                  fallback={(
+                    <div class="media-player-audio-artwork media-player-audio-artwork-fallback" aria-hidden="true">
+                      <Disc3 size={54} />
+                    </div>
+                  )}
+                >
+                  <img
+                    class="media-player-audio-artwork"
+                    src={player.currentItem()?.artworkUrl || ''}
+                    alt={`${player.currentItem()?.subtitle || player.currentItem()?.title || 'Album'} artwork`}
+                    onError={() => setArtworkLoadFailed(true)}
+                  />
+                </Show>
+              </div>
+              <Show when={showPlaylist()}>
+                {renderPlaylistSection('side')}
               </Show>
             </div>
           </Show>
@@ -883,91 +988,9 @@ export function MediaPlayerPanel() {
             </div>
           </Show>
 
-          <section class="media-player-playlist-block">
-            <div class="media-player-playlist-head">
-              <h4>Current Playlist</h4>
-              <span>{player.queue().length} item{player.queue().length === 1 ? '' : 's'}</span>
-            </div>
-            <div class="media-player-playlist-list">
-              {player.queue().map((item, index) => (
-                <button
-                  type="button"
-                  class={`media-player-playlist-item ${index === player.currentIndex() ? 'active' : ''}`}
-                  onClick={() => void jumpToIndex(index)}
-                >
-                  <span class="media-player-playlist-index">{String(index + 1).padStart(2, '0')}</span>
-                  <span class="media-player-playlist-labels">
-                    <span>{item.title}</span>
-                    <Show when={item.subtitle}>
-                      <small>{item.subtitle}</small>
-                    </Show>
-                    <Show when={index === player.currentIndex()}>
-                      <small class="media-player-playlist-status">Now Playing</small>
-                    </Show>
-                    <Show when={index === player.currentIndex() + 1}>
-                      <small class="media-player-playlist-status">Up Next</small>
-                    </Show>
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            <div class="media-player-playlist-add">
-              <label for="playlist-library-search">Add local media</label>
-              <div class="media-player-playlist-search-row">
-                <input
-                  id="playlist-library-search"
-                  class="input"
-                  type="search"
-                  value={libraryQuery()}
-                  onInput={(event) => setLibraryQuery(event.currentTarget.value)}
-                  placeholder="Search movies, episodes, tracks..."
-                />
-                <button
-                  type="button"
-                  class="media-player-icon-button"
-                  onClick={() => void loadPlaybackLibrary()}
-                  disabled={isLoadingLibrary()}
-                >
-                  {isLoadingLibrary() ? 'Refreshing...' : 'Refresh'}
-                </button>
-              </div>
-              <div class="media-player-library-results">
-                <Show
-                  when={!isLoadingLibrary() && filteredLibraryItems().length > 0}
-                  fallback={(
-                    <p class="media-player-playlist-empty">
-                      {isLoadingLibrary() ? 'Loading local media...' : 'No matching media found.'}
-                    </p>
-                  )}
-                >
-                  {filteredLibraryItems().map((item) => (
-                    <div class="media-player-library-item">
-                      <div class="media-player-library-item-labels">
-                        <span>{item.title}</span>
-                        <Show when={item.subtitle}>
-                          <small>{item.subtitle}</small>
-                        </Show>
-                      </div>
-                      <button
-                        type="button"
-                        class="media-player-icon-button"
-                        onClick={() => addLibraryItemToPlaylist(item)}
-                      >
-                        Add
-                      </button>
-                    </div>
-                  ))}
-                </Show>
-              </div>
-              <Show when={libraryError()}>
-                <p class="media-player-error">{libraryError()}</p>
-              </Show>
-              <Show when={playlistFeedback()}>
-                <p class="media-player-playlist-feedback">{playlistFeedback()}</p>
-              </Show>
-            </div>
-          </section>
+          <Show when={showPlaylist() && player.currentItem()?.mediaType !== 'audio'}>
+            {renderPlaylistSection()}
+          </Show>
         </div>
       </div>
     </Show>

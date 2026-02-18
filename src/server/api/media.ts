@@ -131,6 +131,14 @@ interface PlaybackProgressEntry {
   updatedAt: number;
 }
 
+interface DurationCacheEntry {
+  durationSeconds: number;
+  expiresAt: number;
+}
+
+const mediaDurationCache = new Map<string, DurationCacheEntry>();
+const MEDIA_DURATION_CACHE_TTL_MS = 1000 * 60 * 30;
+
 async function getSettingValue(key: string): Promise<string | null> {
   const result = await db
     .select({ value: settings.value })
@@ -1634,6 +1642,59 @@ async function resolveFfmpegBinaryPath(): Promise<string | null> {
   return null;
 }
 
+function parseDurationSecondsFromFfmpegOutput(stderrOutput: string): number | null {
+  const match = stderrOutput.match(/Duration:\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/i);
+  if (!match) return null;
+  const hours = Number.parseInt(match[1] || '0', 10);
+  const minutes = Number.parseInt(match[2] || '0', 10);
+  const seconds = Number.parseFloat(match[3] || '0');
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+  const total = (hours * 3600) + (minutes * 60) + seconds;
+  if (!Number.isFinite(total) || total <= 0) return null;
+  return total;
+}
+
+async function probeMediaDurationSeconds(filePath: string): Promise<number | null> {
+  const ffmpegBinary = await resolveFfmpegBinaryPath();
+  if (!ffmpegBinary) return null;
+
+  let fileStats: Awaited<ReturnType<typeof stat>>;
+  try {
+    fileStats = await stat(filePath);
+  } catch {
+    return null;
+  }
+  if (!fileStats.isFile()) return null;
+
+  const cacheKey = `${filePath}|${fileStats.size}|${Math.floor(fileStats.mtimeMs)}`;
+  const cached = mediaDurationCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return cached.durationSeconds;
+  }
+
+  const probe = await runProcessCommand(
+    ffmpegBinary,
+    [
+      '-hide_banner',
+      '-nostdin',
+      '-i', filePath,
+    ],
+    10_000,
+  );
+
+  const parsedDuration = parseDurationSecondsFromFfmpegOutput(probe.stderr);
+  if (typeof parsedDuration === 'number' && parsedDuration > 0) {
+    mediaDurationCache.set(cacheKey, {
+      durationSeconds: parsedDuration,
+      expiresAt: now + MEDIA_DURATION_CACHE_TTL_MS,
+    });
+    return parsedDuration;
+  }
+
+  return null;
+}
+
 function isMkvFile(filePath: string): boolean {
   return path.extname(filePath).toLowerCase() === '.mkv';
 }
@@ -2672,9 +2733,23 @@ mediaRoutes.get('/playback/progress/:kind/:id', async (c) => {
   try {
     const progressMap = await readPlaybackProgressMap();
     const entry = progressMap[buildPlaybackProgressKey(kind, mediaId)] || null;
-    return c.json({ entry });
+    let inferredDurationSeconds: number | null = null;
+
+    if (kind === 'movie' || kind === 'episode') {
+      const needsDuration = !entry || typeof entry.durationSeconds !== 'number' || entry.durationSeconds <= 0;
+      if (needsDuration) {
+        const filePath = kind === 'movie'
+          ? await resolveMoviePlaybackFile(mediaId)
+          : await resolveEpisodePlaybackFile(mediaId);
+        if (filePath) {
+          inferredDurationSeconds = await probeMediaDurationSeconds(filePath);
+        }
+      }
+    }
+
+    return c.json({ entry, inferredDurationSeconds });
   } catch {
-    return c.json({ entry: null });
+    return c.json({ entry: null, inferredDurationSeconds: null });
   }
 });
 
