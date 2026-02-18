@@ -97,6 +97,7 @@ export function MediaPlayerPanel() {
   const [lastPersistedKey, setLastPersistedKey] = createSignal<string | null>(null);
   const [lastPersistedSecond, setLastPersistedSecond] = createSignal(0);
   const [autoplayRequested, setAutoplayRequested] = createSignal(false);
+  const [lastHandledPlayToken, setLastHandledPlayToken] = createSignal<number | null>(null);
   const [isFullscreen, setIsFullscreen] = createSignal(false);
   const [showFullscreenControls, setShowFullscreenControls] = createSignal(true);
   const [isScrubbing, setIsScrubbing] = createSignal(false);
@@ -856,10 +857,10 @@ export function MediaPlayerPanel() {
     setDidApplyResume(false);
     setLastPersistedKey(null);
     setLastPersistedSecond(0);
-    setAutoplayRequested(true);
+    const shouldAutoplay = lastHandledPlayToken() !== token;
+    setLastHandledPlayToken(token);
+    setAutoplayRequested(shouldAutoplay);
     void loadProgressForCurrent();
-
-    void token;
   });
 
   createEffect(() => {
