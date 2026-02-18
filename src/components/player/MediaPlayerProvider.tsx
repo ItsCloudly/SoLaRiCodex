@@ -174,14 +174,12 @@ export function MediaPlayerPanel() {
     plainLyrics: null,
     error: null,
   });
-  const [lastScrolledLyricIndex, setLastScrolledLyricIndex] = createSignal<number | null>(null);
 
   let videoRef: HTMLVideoElement | undefined;
   let audioRef: HTMLAudioElement | undefined;
   let panelRef: HTMLDivElement | undefined;
   let videoStageRef: HTMLDivElement | undefined;
   let controlsHideTimeout: ReturnType<typeof setTimeout> | undefined;
-  let lyricsListRef: HTMLDivElement | undefined;
 
   const getActiveElement = (): HTMLMediaElement | null => {
     const item = player.currentItem();
