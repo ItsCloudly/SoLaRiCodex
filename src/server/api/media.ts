@@ -149,6 +149,7 @@ const MEDIA_DURATION_CACHE_TTL_MS = 1000 * 60 * 30;
 function normalizeLyricsQuery(input: string | null | undefined): string | null {
   if (!input) return null;
   const cleaned = input
+    .replace(/[’‘]/g, "'")
     .replace(/\(([^)]+)\)/g, ' ')
     .replace(/\[([^\]]+)\]/g, ' ')
     .replace(/feat\.?|featuring/gi, ' ')
@@ -158,6 +159,33 @@ function normalizeLyricsQuery(input: string | null | undefined): string | null {
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned.length > 0 ? cleaned : null;
+}
+
+function stripTrackNumberPrefix(input: string): string {
+  return input.replace(/^\s*\d{1,3}\s*[.\-]\s*/g, '').trim();
+}
+
+async function fetchJsonWithRetries(url: URL, options: { timeoutMs: number; retries: number }): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= options.retries; attempt += 1) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(options.timeoutMs) });
+      return response;
+    } catch (error) {
+      lastError = error;
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        continue;
+      }
+      if (error instanceof Error && error.name === 'AbortError') {
+        continue;
+      }
+      throw error;
+    }
+  }
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error('Lyrics provider timed out');
 }
 
 async function fetchSyncedLyricsFromLrclib(params: {
@@ -175,6 +203,10 @@ async function fetchSyncedLyricsFromLrclib(params: {
   const normalizedTrack = normalizeLyricsQuery(trackTitle);
   const normalizedArtist = normalizeLyricsQuery(artistName);
   const normalizedAlbum = normalizeLyricsQuery(albumTitle);
+  const artistNoComma = artistName.replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+  const normalizedArtistNoComma = normalizeLyricsQuery(artistNoComma);
+  const strippedTrackTitle = stripTrackNumberPrefix(trackTitle);
+  const normalizedStrippedTrack = normalizeLyricsQuery(strippedTrackTitle);
 
   const duration = (
     typeof params.durationSeconds === 'number'
@@ -184,28 +216,22 @@ async function fetchSyncedLyricsFromLrclib(params: {
     ? String(Math.round(params.durationSeconds))
     : null;
 
+  const trackVariants = [trackTitle, strippedTrackTitle, normalizedTrack, normalizedStrippedTrack]
+    .filter((value, index, self): value is string => Boolean(value && self.indexOf(value) === index));
+  const artistVariants = [artistName, artistNoComma, normalizedArtist, normalizedArtistNoComma]
+    .filter((value, index, self): value is string => Boolean(value && self.indexOf(value) === index));
+  const albumVariants = [albumTitle, normalizedAlbum]
+    .filter((value, index, self): value is string => Boolean(value && self.indexOf(value) === index));
+
   const candidates: Array<{ track: string; artist: string; album?: string | null }> = [];
-  candidates.push({ track: trackTitle, artist: artistName, album: albumTitle || null });
-  candidates.push({ track: trackTitle, artist: artistName, album: null });
-  if (normalizedTrack && normalizedTrack !== trackTitle) {
-    candidates.push({ track: normalizedTrack, artist: artistName, album: albumTitle || null });
-    candidates.push({ track: normalizedTrack, artist: artistName, album: null });
-  }
-  if (normalizedArtist && normalizedArtist !== artistName) {
-    candidates.push({ track: trackTitle, artist: normalizedArtist, album: albumTitle || null });
-    candidates.push({ track: trackTitle, artist: normalizedArtist, album: null });
-  }
-  if (normalizedTrack && normalizedArtist) {
-    candidates.push({ track: normalizedTrack, artist: normalizedArtist, album: normalizedAlbum || null });
-    candidates.push({ track: normalizedTrack, artist: normalizedArtist, album: null });
-  }
-  if (normalizedAlbum && normalizedAlbum !== albumTitle) {
-    candidates.push({ track: trackTitle, artist: artistName, album: normalizedAlbum });
-    if (normalizedArtist && normalizedArtist !== artistName) {
-      candidates.push({ track: trackTitle, artist: normalizedArtist, album: normalizedAlbum });
-    }
-    if (normalizedTrack && normalizedTrack !== trackTitle) {
-      candidates.push({ track: normalizedTrack, artist: artistName, album: normalizedAlbum });
+  for (const track of trackVariants) {
+    for (const artist of artistVariants) {
+      if (albumVariants.length > 0) {
+        for (const album of albumVariants) {
+          candidates.push({ track, artist, album });
+        }
+      }
+      candidates.push({ track, artist, album: null });
     }
   }
 
@@ -225,7 +251,7 @@ async function fetchSyncedLyricsFromLrclib(params: {
       url.searchParams.set('duration', duration);
     }
 
-    const response = await fetch(url, { signal: AbortSignal.timeout(12000) });
+    const response = await fetchJsonWithRetries(url, { timeoutMs: 16000, retries: 1 });
     if (response.status === 404) {
       continue;
     }
