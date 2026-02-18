@@ -278,7 +278,7 @@ export default function TvDetailsPage() {
         mediaType: 'video' as const,
         title: `${formatEpisodeCode(episode.season, episode.episode)} - ${episode.title || `Episode ${episode.episode}`}`,
         subtitle: currentSeries.title,
-        streamUrl: `/api/media/playback/video/episode/${episode.id}`,
+        streamUrl: `/api/media/playback/video-compat/episode/${episode.id}`,
       }));
   };
 

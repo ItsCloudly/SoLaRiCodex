@@ -108,6 +108,7 @@ export function MediaPlayerPanel() {
   const [playlistFeedback, setPlaylistFeedback] = createSignal<string | null>(null);
   const [artworkLoadFailed, setArtworkLoadFailed] = createSignal(false);
   const [isOpeningExternal, setIsOpeningExternal] = createSignal(false);
+  const [compatibilitySeekBaseSeconds, setCompatibilitySeekBaseSeconds] = createSignal(0);
 
   let videoRef: HTMLVideoElement | undefined;
   let audioRef: HTMLAudioElement | undefined;
@@ -208,6 +209,11 @@ export function MediaPlayerPanel() {
     if (item.mediaKind === 'track') return;
 
     const currentTime = Number.isFinite(mediaElement.currentTime) ? mediaElement.currentTime : 0;
+    const absoluteCurrentTime = (
+      item.mediaType === 'video' && isCompatibilityVideoUrl(item.streamUrl)
+    )
+      ? currentTime + compatibilitySeekBaseSeconds()
+      : currentTime;
     const detectedDuration = Number.isFinite(mediaElement.duration) ? mediaElement.duration : 0;
     const knownSavedDuration = savedDurationSeconds() || 0;
     const isUnreliableShortVideoDuration = (
@@ -219,14 +225,14 @@ export function MediaPlayerPanel() {
     const duration = isUnreliableShortVideoDuration
       ? knownSavedDuration
       : detectedDuration;
-    const completed = options?.completed || (duration > 0 && currentTime >= Math.max(0, duration - 3));
+    const completed = options?.completed || (duration > 0 && absoluteCurrentTime >= Math.max(0, duration - 3));
     const progressKey = `${item.mediaKind}:${item.mediaId}`;
 
-    if (!options?.force && lastPersistedKey() === progressKey && Math.abs(currentTime - lastPersistedSecond()) < 5) {
+    if (!options?.force && lastPersistedKey() === progressKey && Math.abs(absoluteCurrentTime - lastPersistedSecond()) < 5) {
       return;
     }
 
-    if (currentTime < 1 && !completed) return;
+    if (absoluteCurrentTime < 1 && !completed) return;
 
     const response = await requestJson<{ entry?: PlaybackProgressEntry | null; cleared?: boolean }>('/api/media/playback/progress', {
       method: 'PUT',
@@ -234,7 +240,7 @@ export function MediaPlayerPanel() {
       body: JSON.stringify({
         mediaKind: item.mediaKind,
         mediaId: item.mediaId,
-        positionSeconds: currentTime,
+        positionSeconds: absoluteCurrentTime,
         durationSeconds: duration > 0 ? duration : undefined,
         completed,
       }),
@@ -242,7 +248,7 @@ export function MediaPlayerPanel() {
 
     if (response.error) return;
     setLastPersistedKey(progressKey);
-    setLastPersistedSecond(currentTime);
+    setLastPersistedSecond(absoluteCurrentTime);
   };
 
   const loadProgressForCurrent = async () => {
@@ -309,11 +315,17 @@ export function MediaPlayerPanel() {
 
   const startOver = async () => {
     const mediaElement = getActiveElement();
+    const item = player.currentItem();
     if (mediaElement) {
-      mediaElement.currentTime = 0;
+      if (item?.mediaType === 'video' && isCompatibilityVideoUrl(item.streamUrl)) {
+        await seekByCompatibilityRestart(0);
+      } else {
+        mediaElement.currentTime = 0;
+      }
       setCurrentSeconds(0);
     }
 
+    setCompatibilitySeekBaseSeconds(0);
     setResumeSeconds(null);
     setDidApplyResume(true);
     await clearStoredProgressForCurrent();
@@ -428,14 +440,48 @@ export function MediaPlayerPanel() {
     scheduleFullscreenControlsHide(280);
   };
 
+  const isCompatibilityVideoUrl = (url: string): boolean => (
+    url.includes('/api/media/playback/video-compat/')
+  );
+
+  const seekByCompatibilityRestart = async (targetSeconds: number) => {
+    const item = player.currentItem();
+    const mediaElement = getActiveElement();
+    if (!item || !mediaElement || item.mediaType !== 'video' || !isCompatibilityVideoUrl(item.streamUrl)) return;
+
+    const duration = durationSeconds();
+    const clampedTarget = clamp(targetSeconds, 0, duration > 0 ? duration : targetSeconds);
+    const wasPlaying = !mediaElement.paused;
+    const streamUrl = new URL(item.streamUrl, window.location.origin);
+    if (clampedTarget > 0.05) {
+      streamUrl.searchParams.set('start', String(clampedTarget));
+    } else {
+      streamUrl.searchParams.delete('start');
+    }
+
+    setAutoplayRequested(wasPlaying);
+    setResumeSeconds(null);
+    setDidApplyResume(true);
+    setCompatibilitySeekBaseSeconds(clampedTarget);
+    mediaElement.src = streamUrl.pathname + streamUrl.search;
+    mediaElement.currentTime = 0;
+    mediaElement.load();
+    setCurrentSeconds(clampedTarget);
+  };
+
   const seekBySeconds = (deltaSeconds: number) => {
     const mediaElement = getActiveElement();
     if (!mediaElement) return;
 
-    const duration = Number.isFinite(mediaElement.duration) ? mediaElement.duration : Infinity;
-    const nextPosition = clamp(mediaElement.currentTime + deltaSeconds, 0, duration);
-    mediaElement.currentTime = nextPosition;
-    setCurrentSeconds(nextPosition);
+    const duration = Number.isFinite(mediaElement.duration) ? mediaElement.duration : durationSeconds() || Infinity;
+    const item = player.currentItem();
+    const baseCurrent = (
+      item?.mediaType === 'video' && isCompatibilityVideoUrl(item.streamUrl)
+    )
+      ? currentSeconds()
+      : mediaElement.currentTime;
+    const nextPosition = clamp(baseCurrent + deltaSeconds, 0, duration);
+    seekToSeconds(nextPosition);
   };
 
   const seekToSeconds = (nextSeconds: number) => {
@@ -445,6 +491,11 @@ export function MediaPlayerPanel() {
 
     const duration = Number.isFinite(mediaElement.duration) ? mediaElement.duration : durationSeconds();
     const clamped = clamp(nextSeconds, 0, duration > 0 ? duration : nextSeconds);
+    const item = player.currentItem();
+    if (item?.mediaType === 'video' && isCompatibilityVideoUrl(item.streamUrl)) {
+      void seekByCompatibilityRestart(clamped);
+      return;
+    }
     mediaElement.currentTime = clamped;
     setCurrentSeconds(clamped);
   };
@@ -486,7 +537,7 @@ export function MediaPlayerPanel() {
       setDidApplyResume(true);
       setCurrentSeconds(resumeTarget);
     } else {
-      setCurrentSeconds(mediaElement.currentTime || 0);
+      setCurrentSeconds((mediaElement.currentTime || 0) + compatibilitySeekBaseSeconds());
     }
 
     syncElementVolume();
@@ -500,7 +551,13 @@ export function MediaPlayerPanel() {
 
   const handleTimeUpdate = (event: Event) => {
     const mediaElement = event.currentTarget as HTMLMediaElement;
-    setCurrentSeconds(mediaElement.currentTime || 0);
+    const item = player.currentItem();
+    const absoluteSeconds = (
+      item?.mediaType === 'video' && isCompatibilityVideoUrl(item.streamUrl)
+    )
+      ? (mediaElement.currentTime || 0) + compatibilitySeekBaseSeconds()
+      : (mediaElement.currentTime || 0);
+    setCurrentSeconds(absoluteSeconds);
     void persistProgress();
   };
 
@@ -685,11 +742,8 @@ export function MediaPlayerPanel() {
             {isLoadingLibrary() ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
-        <div class="media-player-library-results">
-          <Show
-            when={!isLoadingLibrary() && filteredLibraryItems().length > 0}
-            fallback={<></>}
-          >
+        <Show when={!isLoadingLibrary() && filteredLibraryItems().length > 0}>
+          <div class="media-player-library-results">
             {filteredLibraryItems().map((item) => (
               <div class="media-player-library-item">
                 <div class="media-player-library-item-labels">
@@ -707,8 +761,8 @@ export function MediaPlayerPanel() {
                 </button>
               </div>
             ))}
-          </Show>
-        </div>
+          </div>
+        </Show>
         <Show when={libraryError()}>
           <p class="media-player-error">{libraryError()}</p>
         </Show>
@@ -835,6 +889,7 @@ export function MediaPlayerPanel() {
         player.setPlaybackError(null);
         setDurationSeconds(0);
         setCurrentSeconds(0);
+        setCompatibilitySeekBaseSeconds(0);
         setIsPlaying(false);
 
         // Ensure we always switch to the newly selected stream before load().

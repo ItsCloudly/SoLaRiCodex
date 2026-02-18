@@ -154,7 +154,7 @@ export default function MovieDetailsPage() {
       mediaType: 'video',
       title: currentMovie.title,
       subtitle: currentMovie.releaseDate || undefined,
-      streamUrl: `/api/media/playback/video/movie/${currentMovie.id}`,
+      streamUrl: `/api/media/playback/video-compat/movie/${currentMovie.id}`,
     });
     void navigate('/player');
   };

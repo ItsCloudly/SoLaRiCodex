@@ -1816,11 +1816,16 @@ async function buildMkvCompatibilityStreamResponse(c: Context, filePath: string)
     return c.json({ error: 'MKV compatibility stream unavailable: ffmpeg is not configured.' }, 500);
   }
 
-  const baseArgs = [
-    '-hide_banner',
-    '-loglevel', 'error',
-    '-nostdin',
-    '-i', filePath,
+  const requestedStartRaw = c.req.query('start');
+  const parsedRequestedStart = requestedStartRaw ? Number.parseFloat(requestedStartRaw) : 0;
+  const startSeconds = Number.isFinite(parsedRequestedStart) && parsedRequestedStart > 0
+    ? parsedRequestedStart
+    : 0;
+  const inputArgs = startSeconds > 0
+    ? ['-ss', String(startSeconds), '-i', filePath]
+    : ['-i', filePath];
+
+  const outputArgs = [
     '-map', '0:v:0',
     '-map', '0:a:0?',
     '-dn',
@@ -1833,20 +1838,28 @@ async function buildMkvCompatibilityStreamResponse(c: Context, filePath: string)
     'pipe:1',
   ];
 
-  const copyVideoAttempt = await startFfmpegCompatibilityStream(c, ffmpegBinary, filePath, [
-    ...baseArgs.slice(0, 10),
+  const copyVideoArgs = [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-nostdin',
+    ...inputArgs,
     '-c:v', 'copy',
-    ...baseArgs.slice(10),
-  ]);
+    ...outputArgs,
+  ];
+
+  const copyVideoAttempt = await startFfmpegCompatibilityStream(c, ffmpegBinary, filePath, copyVideoArgs);
   if (copyVideoAttempt.response) return copyVideoAttempt.response;
 
   const transcodeVideoAttempt = await startFfmpegCompatibilityStream(c, ffmpegBinary, filePath, [
-    ...baseArgs.slice(0, 10),
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-nostdin',
+    ...inputArgs,
     '-c:v', 'libx264',
     '-preset', 'veryfast',
     '-crf', '23',
     '-pix_fmt', 'yuv420p',
-    ...baseArgs.slice(10),
+    ...outputArgs,
   ]);
   if (transcodeVideoAttempt.response) return transcodeVideoAttempt.response;
 
@@ -2645,7 +2658,7 @@ mediaRoutes.get('/playback/library', async (c) => {
       mediaKind: 'movie',
       title: row.title,
       subtitle: row.releaseDate || undefined,
-      streamUrl: `/api/media/playback/video/movie/${row.mediaId}`,
+      streamUrl: `/api/media/playback/video-compat/movie/${row.mediaId}`,
     });
   }
 
@@ -2663,7 +2676,7 @@ mediaRoutes.get('/playback/library', async (c) => {
       mediaKind: 'episode',
       title: `${code} - ${episodeTitle}`,
       subtitle: seriesTitles.get(row.seriesId) || 'TV Series',
-      streamUrl: `/api/media/playback/video/episode/${row.id}`,
+      streamUrl: `/api/media/playback/video-compat/episode/${row.id}`,
     });
   }
 
