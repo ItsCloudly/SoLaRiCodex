@@ -136,7 +136,7 @@ export default function ActivityPage() {
         )}
 
         <div class="activity-grid">
-          <Card class="activity-section">
+          <Card class="activity-section activity-section-active">
             <CardHeader>
               <CardTitle>Active Downloads</CardTitle>
               <Badge variant="info">{activeDownloads().length} active</Badge>
@@ -196,7 +196,7 @@ export default function ActivityPage() {
             </div>
           </Card>
 
-          <Card class="activity-section">
+          <Card class="activity-section activity-section-completed">
             <CardHeader>
               <CardTitle>Completed</CardTitle>
               <Badge variant="success">{completedDownloads().length}</Badge>
@@ -222,7 +222,7 @@ export default function ActivityPage() {
             </div>
           </Card>
 
-          <Card class="activity-section">
+          <Card class="activity-section activity-section-failed">
             <CardHeader>
               <CardTitle>Failed</CardTitle>
               <Badge variant="error">{failedDownloads().length}</Badge>

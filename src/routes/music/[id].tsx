@@ -1,7 +1,8 @@
 import { createAsync, useNavigate, useParams } from '@solidjs/router';
 import { createEffect, createSignal } from 'solid-js';
-import { Calendar, Disc, Hash, Music } from 'lucide-solid';
+import { Calendar, Disc, Hash, Music, Play } from 'lucide-solid';
 import MainLayout from '~/components/layout/MainLayout';
+import { useMediaPlayer } from '~/components/player/MediaPlayerProvider';
 import { Badge, Button, Card, CardHeader, CardTitle, Input } from '~/components/ui';
 import { fetchJson, requestJson } from '~/lib/api';
 
@@ -11,6 +12,21 @@ interface ArtistAlbum {
   posterPath?: string | null;
   releaseDate?: string | null;
   status: 'wanted' | 'downloaded' | 'archived';
+}
+
+interface AlbumTrack {
+  id: number;
+  trackNumber?: number | null;
+  duration?: number | null;
+  downloaded?: boolean | number | null;
+  filePath?: string | null;
+  title?: string | null;
+}
+
+interface AlbumDetailsResponse {
+  id: number;
+  title: string;
+  tracks: AlbumTrack[];
 }
 
 interface ArtistDetails {
@@ -180,9 +196,19 @@ function groupReleaseGroupsByCategory(groups: MusicReleaseGroup[]): ReleaseGroup
 
   return categories.filter((category) => category.groups.length > 0);
 }
+
+function isDownloadedFlag(value: unknown): boolean {
+  return value === true || value === 1;
+}
+
+function hasLocalTrackFile(track: AlbumTrack): boolean {
+  return typeof track.filePath === 'string' && track.filePath.trim().length > 0;
+}
+
 export default function ArtistDetailsPage() {
   const params = useParams();
   const navigate = useNavigate();
+  const mediaPlayer = useMediaPlayer();
   const artistResult = createAsync(() => fetchJson<ArtistDetails>(`/api/media/music/artists/${params.id}`));
 
   const artist = () => artistResult()?.data;
@@ -210,6 +236,10 @@ export default function ArtistDetailsPage() {
   const [searchResultsContext, setSearchResultsContext] = createSignal<'manual' | 'record' | null>(null);
   const [activeRecordSearchId, setActiveRecordSearchId] = createSignal<string | null>(null);
   const [expandedRecordId, setExpandedRecordId] = createSignal<string | null>(null);
+  const [libraryError, setLibraryError] = createSignal<string | null>(null);
+  const [libraryLoadingAlbumId, setLibraryLoadingAlbumId] = createSignal<number | null>(null);
+  const [expandedLibraryAlbumId, setExpandedLibraryAlbumId] = createSignal<number | null>(null);
+  const [albumTracksById, setAlbumTracksById] = createSignal<Record<number, AlbumTrack[]>>({});
   const groupedReleaseGroups = () => groupReleaseGroupsByCategory(releaseGroups());
 
   createEffect(() => {
@@ -228,10 +258,91 @@ export default function ArtistDetailsPage() {
     setSearchResultsContext(null);
     setActiveRecordSearchId(null);
     setExpandedRecordId(null);
+    setLibraryError(null);
+    setLibraryLoadingAlbumId(null);
+    setExpandedLibraryAlbumId(null);
+    setAlbumTracksById({});
 
     void loadIndexerFilters();
     void loadArtistReleaseGroups(currentArtist.musicBrainzId, currentArtist.title);
   });
+
+  const fetchAlbumTracks = async (albumId: number): Promise<AlbumTrack[] | null> => {
+    const cached = albumTracksById()[albumId];
+    if (Array.isArray(cached)) return cached;
+
+    setLibraryLoadingAlbumId(albumId);
+    setLibraryError(null);
+    const response = await requestJson<AlbumDetailsResponse>(`/api/media/music/albums/${albumId}`);
+    setLibraryLoadingAlbumId(null);
+
+    if (response.error || !response.data) {
+      setLibraryError(response.error || 'Failed to load album tracks');
+      return null;
+    }
+
+    const tracks = [...(response.data.tracks || [])].sort((a, b) => {
+      const aTrack = typeof a.trackNumber === 'number' ? a.trackNumber : Number.MAX_SAFE_INTEGER;
+      const bTrack = typeof b.trackNumber === 'number' ? b.trackNumber : Number.MAX_SAFE_INTEGER;
+      return aTrack - bTrack;
+    });
+
+    setAlbumTracksById((current) => ({
+      ...current,
+      [albumId]: tracks,
+    }));
+    return tracks;
+  };
+
+  const buildAlbumPlaylist = (
+    album: ArtistAlbum,
+    albumTracks: AlbumTrack[],
+  ) => {
+    const currentArtist = artist();
+    if (!currentArtist) return [];
+
+    return albumTracks
+      .filter((track) => isDownloadedFlag(track.downloaded) || hasLocalTrackFile(track))
+      .map((track, index) => ({
+        id: `track-${track.id}`,
+        mediaId: track.id,
+        mediaKind: 'track' as const,
+        mediaType: 'audio' as const,
+        title: track.title?.trim() || `Track ${typeof track.trackNumber === 'number' ? track.trackNumber : index + 1}`,
+        subtitle: `${currentArtist.title} - ${album.title}`,
+        streamUrl: `/api/media/playback/audio/track/${track.id}`,
+        artworkUrl: `/api/media/playback/artwork/album/${album.id}`,
+      }));
+  };
+
+  const playAlbum = async (album: ArtistAlbum, preferredTrackId?: number) => {
+    const tracks = await fetchAlbumTracks(album.id);
+    if (!tracks) return;
+
+    const playlist = buildAlbumPlaylist(album, tracks);
+    if (playlist.length === 0) {
+      setLibraryError('No locally available tracks were detected for this album.');
+      return;
+    }
+
+    const startIndex = typeof preferredTrackId === 'number'
+      ? playlist.findIndex((item) => item.id === `track-${preferredTrackId}`)
+      : 0;
+
+    setLibraryError(null);
+    mediaPlayer.openPlaylist(playlist, startIndex >= 0 ? startIndex : 0);
+    void navigate('/player');
+  };
+
+  const toggleAlbumTracks = async (album: ArtistAlbum) => {
+    if (expandedLibraryAlbumId() === album.id) {
+      setExpandedLibraryAlbumId(null);
+      return;
+    }
+
+    setExpandedLibraryAlbumId(album.id);
+    await fetchAlbumTracks(album.id);
+  };
 
   const updateIdSelection = (
     current: number[],
@@ -326,8 +437,8 @@ export default function ArtistDetailsPage() {
 
     setReleaseGroups(groups);
     if (groups.length > 0) {
-      setSelectedReleaseGroupId(groups[0].id);
-      setReleaseQuery(`${artistTitle} ${groups[0].title}`);
+      setSelectedReleaseGroupId('');
+      setReleaseQuery(artistTitle);
     } else {
       setReleaseQuery(artistTitle);
       setJackettMessage('No records found in MusicBrainz for this artist. Searching by artist name only.');
@@ -572,6 +683,81 @@ export default function ArtistDetailsPage() {
                   </div>
                 </div>
               </div>
+            </Card>
+
+            <Card class="music-library-card">
+              <CardHeader>
+                <CardTitle>Library Albums</CardTitle>
+              </CardHeader>
+
+              {libraryError() && <p class="inline-feedback error">{libraryError()}</p>}
+
+              {artist()?.albums.length === 0 ? (
+                <p class="jackett-empty">No albums are stored under this artist yet.</p>
+              ) : (
+                <div class="music-library-albums">
+                  {artist()?.albums.map((album) => (
+                    <Card class="music-library-album-card" key={`album-${album.id}`}>
+                      <div class="music-library-album-header">
+                        <div class="music-library-album-meta">
+                          <h3>{album.title}</h3>
+                          <p>Release: {formatYear(album.releaseDate || null)}</p>
+                        </div>
+                        <div class="music-library-album-actions">
+                          <Badge variant={album.status === 'downloaded' ? 'success' : 'warning'}>
+                            {album.status}
+                          </Badge>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void toggleAlbumTracks(album)}
+                            disabled={libraryLoadingAlbumId() === album.id}
+                          >
+                            {expandedLibraryAlbumId() === album.id ? 'Hide Tracks' : 'View Tracks'}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => void playAlbum(album)}
+                            disabled={libraryLoadingAlbumId() === album.id}
+                          >
+                            <Play size={13} />
+                            Play Album
+                          </Button>
+                        </div>
+                      </div>
+
+                      {expandedLibraryAlbumId() === album.id && (
+                        <div class="music-library-tracks">
+                          {(albumTracksById()[album.id] || []).length === 0 ? (
+                            <p class="jackett-empty">No tracks found for this album yet.</p>
+                          ) : (
+                            (albumTracksById()[album.id] || []).map((track, index) => (
+                              <div class="music-library-track-row">
+                                <span class="music-library-track-number">
+                                  {typeof track.trackNumber === 'number' ? String(track.trackNumber).padStart(2, '0') : String(index + 1).padStart(2, '0')}
+                                </span>
+                                <span class="music-library-track-title">
+                                  {track.title?.trim() || `Track ${index + 1}`}
+                                </span>
+                                <Badge variant={isDownloadedFlag(track.downloaded) || hasLocalTrackFile(track) ? 'success' : 'warning'}>
+                                  {isDownloadedFlag(track.downloaded) || hasLocalTrackFile(track) ? 'available locally' : 'wanted'}
+                                </Badge>
+                                {(isDownloadedFlag(track.downloaded) || hasLocalTrackFile(track)) && (
+                                  <Button variant="ghost" size="sm" onClick={() => void playAlbum(album, track.id)}>
+                                    <Play size={12} />
+                                    Play
+                                  </Button>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              )}
             </Card>
 
             <Card class="jackett-panel movie-jackett-panel">

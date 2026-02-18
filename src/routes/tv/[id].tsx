@@ -1,12 +1,23 @@
 import { createAsync, useNavigate, useParams } from '@solidjs/router';
-import { createEffect, createSignal } from 'solid-js';
-import { Film, Calendar, Clock, Hash, Play } from 'lucide-solid';
+import { createEffect, createMemo, createSignal } from 'solid-js';
+import { Calendar, Hash, Play, Tv } from 'lucide-solid';
 import MainLayout from '~/components/layout/MainLayout';
 import { useMediaPlayer } from '~/components/player/MediaPlayerProvider';
 import { Badge, Button, Card, CardHeader, CardTitle, Input } from '~/components/ui';
 import { fetchJson, requestJson } from '~/lib/api';
 
-interface MovieDetails {
+interface TvEpisode {
+  id: number;
+  season: number;
+  episode: number;
+  airDate?: string | null;
+  title?: string | null;
+  overview?: string | null;
+  downloaded?: boolean | number | null;
+  filePath?: string | null;
+}
+
+interface TvSeriesDetails {
   id: number;
   title: string;
   originalTitle?: string | null;
@@ -14,11 +25,17 @@ interface MovieDetails {
   posterPath?: string | null;
   backdropPath?: string | null;
   releaseDate?: string | null;
-  runtime?: number | null;
-  tmdbId?: number | null;
-  imdbId?: string | null;
-  status: 'wanted' | 'downloaded' | 'archived';
+  status: 'continuing' | 'ended' | 'wanted' | 'downloaded' | 'archived';
   path?: string | null;
+  tvdbId?: number | null;
+  episodes: TvEpisode[];
+}
+
+interface SeasonGroup {
+  season: number;
+  episodes: TvEpisode[];
+  totalCount: number;
+  downloadedCount: number;
 }
 
 interface JackettIndexerFilter {
@@ -74,6 +91,10 @@ interface JackettSearchResponse {
   total: number;
 }
 
+function isEpisodeDownloaded(value: TvEpisode['downloaded']): boolean {
+  return value === true || value === 1;
+}
+
 function formatSize(bytes: number | null | undefined): string {
   if (typeof bytes !== 'number' || bytes <= 0) return 'n/a';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -95,11 +116,6 @@ function formatPublishDate(value: string | null | undefined): string {
   return parsed.toLocaleString();
 }
 
-function formatRuntime(minutes: number | null | undefined): string {
-  if (typeof minutes !== 'number' || minutes <= 0) return 'n/a';
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
 function formatReleaseYear(value: string | null | undefined): string {
   if (!value) return 'n/a';
   const parsed = new Date(value);
@@ -107,16 +123,85 @@ function formatReleaseYear(value: string | null | undefined): string {
   return String(parsed.getUTCFullYear());
 }
 
-export default function MovieDetailsPage() {
+function formatAirDate(value: string | null | undefined): string {
+  if (!value) return 'n/a';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'n/a';
+  return parsed.toLocaleDateString();
+}
+
+function formatSeasonCode(seasonNumber: number): string {
+  return `S${String(Math.max(0, seasonNumber)).padStart(2, '0')}`;
+}
+
+function formatEpisodeCode(seasonNumber: number, episodeNumber: number): string {
+  return `${formatSeasonCode(seasonNumber)}E${String(Math.max(0, episodeNumber)).padStart(2, '0')}`;
+}
+
+function parseSeasonNumber(rawValue: string): number | null {
+  const trimmed = rawValue.trim();
+  if (trimmed.length === 0) return null;
+
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+function resolveStatusVariant(status: TvSeriesDetails['status']): 'default' | 'success' | 'warning' | 'info' {
+  if (status === 'downloaded') return 'success';
+  if (status === 'continuing') return 'info';
+  if (status === 'ended' || status === 'archived') return 'default';
+  return 'warning';
+}
+
+export default function TvDetailsPage() {
   const params = useParams();
   const navigate = useNavigate();
   const mediaPlayer = useMediaPlayer();
-  const movieResult = createAsync(() => fetchJson<MovieDetails>(`/api/media/movies/${params.id}`));
+  const seriesResult = createAsync(() => fetchJson<TvSeriesDetails>(`/api/media/tv/${params.id}`));
 
-  const movie = () => movieResult()?.data;
-  const loadError = () => movieResult()?.error;
+  const series = () => seriesResult()?.data;
+  const loadError = () => seriesResult()?.error;
 
+  const groupedSeasons = createMemo<SeasonGroup[]>(() => {
+    const currentSeries = series();
+    const episodes = currentSeries?.episodes || [];
+    if (episodes.length === 0) return [];
+
+    const bySeason = new Map<number, TvEpisode[]>();
+
+    for (const episode of episodes) {
+      if (!bySeason.has(episode.season)) {
+        bySeason.set(episode.season, []);
+      }
+      bySeason.get(episode.season)?.push(episode);
+    }
+
+    return Array.from(bySeason.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([seasonNumber, seasonEpisodes]) => {
+        const sortedEpisodes = [...seasonEpisodes].sort((a, b) => a.episode - b.episode);
+        const downloadedCount = sortedEpisodes.filter((episode) => isEpisodeDownloaded(episode.downloaded)).length;
+
+        return {
+          season: seasonNumber,
+          episodes: sortedEpisodes,
+          totalCount: sortedEpisodes.length,
+          downloadedCount,
+        };
+      });
+  });
+
+  const totalDownloadedEpisodes = createMemo(() => (
+    groupedSeasons().reduce((count, seasonGroup) => count + seasonGroup.downloadedCount, 0)
+  ));
+
+  const [initializedSeriesId, setInitializedSeriesId] = createSignal<number | null>(null);
   const [releaseQuery, setReleaseQuery] = createSignal('');
+  const [selectedSeasonNumber, setSelectedSeasonNumber] = createSignal('');
+  const [expandedSeasonNumber, setExpandedSeasonNumber] = createSignal<number | null>(null);
+  const [activeSeasonSearch, setActiveSeasonSearch] = createSignal<number | null>(null);
+
   const [loadingFilters, setLoadingFilters] = createSignal(false);
   const [searchingReleases, setSearchingReleases] = createSignal(false);
   const [sendingToDelugeId, setSendingToDelugeId] = createSignal<string | null>(null);
@@ -132,32 +217,42 @@ export default function MovieDetailsPage() {
   const [playbackError, setPlaybackError] = createSignal<string | null>(null);
 
   createEffect(() => {
-    const currentMovie = movie();
-    if (!currentMovie) return;
-    setReleaseQuery((previous) => (previous.trim().length === 0 ? currentMovie.title : previous));
+    const currentSeries = series();
+    if (!currentSeries) return;
+    if (initializedSeriesId() === currentSeries.id) return;
+
+    const firstSeason = groupedSeasons()[0]?.season;
+
+    setInitializedSeriesId(currentSeries.id);
+    setReleaseQuery(currentSeries.title);
+    setSelectedSeasonNumber(typeof firstSeason === 'number' ? String(firstSeason) : '');
+    setExpandedSeasonNumber(null);
+    setActiveSeasonSearch(null);
+    setJackettResults([]);
+    setJackettFailures([]);
+    setJackettMessage(null);
+    setJackettError(null);
     setPlaybackError(null);
   });
 
-  const playMovie = () => {
-    const currentMovie = movie();
-    if (!currentMovie) return;
-    if (currentMovie.status !== 'downloaded') {
-      setPlaybackError('This movie is not marked as downloaded yet.');
-      return;
+  createEffect(() => {
+    const seasonGroups = groupedSeasons();
+    if (seasonGroups.length === 0) return;
+
+    const availableSeasons = new Set(seasonGroups.map((seasonGroup) => seasonGroup.season));
+    const selectedSeasonRaw = selectedSeasonNumber().trim();
+    if (selectedSeasonRaw.length > 0) {
+      const selectedSeason = parseSeasonNumber(selectedSeasonRaw);
+      if (selectedSeason === null || !availableSeasons.has(selectedSeason)) {
+        setSelectedSeasonNumber(String(seasonGroups[0].season));
+      }
     }
 
-    setPlaybackError(null);
-    mediaPlayer.openItem({
-      id: `movie-${currentMovie.id}`,
-      mediaId: currentMovie.id,
-      mediaKind: 'movie',
-      mediaType: 'video',
-      title: currentMovie.title,
-      subtitle: currentMovie.releaseDate || undefined,
-      streamUrl: `/api/media/playback/video/movie/${currentMovie.id}`,
-    });
-    void navigate('/player');
-  };
+    const expandedSeason = expandedSeasonNumber();
+    if (expandedSeason !== null && !availableSeasons.has(expandedSeason)) {
+      setExpandedSeasonNumber(null);
+    }
+  });
 
   const updateIdSelection = (
     current: number[],
@@ -170,6 +265,53 @@ export default function MovieDetailsPage() {
     return current.filter((value) => value !== id);
   };
 
+  const buildSeasonPlaylistItems = (seasonGroup: SeasonGroup) => {
+    const currentSeries = series();
+    if (!currentSeries) return [];
+
+    return seasonGroup.episodes
+      .filter((episode) => isEpisodeDownloaded(episode.downloaded))
+      .map((episode) => ({
+        id: `episode-${episode.id}`,
+        mediaId: episode.id,
+        mediaKind: 'episode' as const,
+        mediaType: 'video' as const,
+        title: `${formatEpisodeCode(episode.season, episode.episode)} - ${episode.title || `Episode ${episode.episode}`}`,
+        subtitle: currentSeries.title,
+        streamUrl: `/api/media/playback/video/episode/${episode.id}`,
+      }));
+  };
+
+  const playSeason = (seasonGroup: SeasonGroup) => {
+    const playlist = buildSeasonPlaylistItems(seasonGroup);
+    if (playlist.length === 0) {
+      setPlaybackError('No downloaded episodes available in this season yet.');
+      return;
+    }
+
+    setPlaybackError(null);
+    mediaPlayer.openPlaylist(playlist, 0);
+    void navigate('/player');
+  };
+
+  const playEpisode = (seasonGroup: SeasonGroup, episode: TvEpisode) => {
+    if (!isEpisodeDownloaded(episode.downloaded)) {
+      setPlaybackError('This episode is not available locally yet.');
+      return;
+    }
+
+    const playlist = buildSeasonPlaylistItems(seasonGroup);
+    const startIndex = playlist.findIndex((item) => item.id === `episode-${episode.id}`);
+    if (playlist.length === 0 || startIndex < 0) {
+      setPlaybackError('No playable local file found for this episode.');
+      return;
+    }
+
+    setPlaybackError(null);
+    mediaPlayer.openPlaylist(playlist, startIndex);
+    void navigate('/player');
+  };
+
   const loadIndexerFilters = async () => {
     setLoadingFilters(true);
     setJackettError(null);
@@ -177,7 +319,7 @@ export default function MovieDetailsPage() {
     setJackettResults([]);
     setJackettFailures([]);
 
-    const response = await requestJson<JackettFiltersResponse>('/api/search/jackett/filters?category=movies');
+    const response = await requestJson<JackettFiltersResponse>('/api/search/jackett/filters?category=tv');
     if (response.error) {
       setJackettFilters(null);
       setSelectedIndexerIds([]);
@@ -213,25 +355,51 @@ export default function MovieDetailsPage() {
     }
 
     if (response.data.indexers.length === 0) {
-      setJackettError('No enabled Jackett indexers available for movies');
+      setJackettError('No enabled Jackett indexers available for TV');
     }
 
     setLoadingFilters(false);
   };
 
-  const searchReleases = async () => {
-    const currentMovie = movie();
-    if (!currentMovie) return;
+  const resolveSearchQuery = (
+    showTitle: string,
+    forcedSeasonNumber?: number,
+  ): string => {
+    const seasonNumber = typeof forcedSeasonNumber === 'number'
+      ? forcedSeasonNumber
+      : parseSeasonNumber(selectedSeasonNumber());
 
-    const query = releaseQuery().trim();
+    if (typeof seasonNumber === 'number') {
+      return `${showTitle} ${formatSeasonCode(seasonNumber)}`.trim();
+    }
+
+    const manualQuery = releaseQuery().trim();
+    if (manualQuery.length > 0) return manualQuery;
+    return showTitle;
+  };
+
+  const searchReleases = async (forcedSeasonNumber?: number) => {
+    const currentSeries = series();
+    if (!currentSeries) return;
+
+    if (selectedIndexerIds().length === 0) {
+      setJackettError('Select at least one indexer');
+      return;
+    }
+
+    const query = resolveSearchQuery(currentSeries.title, forcedSeasonNumber);
     if (!query) {
       setJackettError('Enter a release query before searching');
       return;
     }
 
-    if (selectedIndexerIds().length === 0) {
-      setJackettError('Select at least one indexer');
-      return;
+    if (typeof forcedSeasonNumber === 'number') {
+      setSelectedSeasonNumber(String(forcedSeasonNumber));
+      setExpandedSeasonNumber(forcedSeasonNumber);
+      setReleaseQuery(query);
+      setActiveSeasonSearch(forcedSeasonNumber);
+    } else {
+      setActiveSeasonSearch(null);
     }
 
     setSearchingReleases(true);
@@ -247,16 +415,15 @@ export default function MovieDetailsPage() {
     const language = selectedLanguageCode().trim().toLowerCase();
 
     const payload: Record<string, unknown> = {
-      category: 'movies',
+      category: 'tv',
       query,
       indexerIds: selectedIndexerIds(),
       categoryIds,
       language: language.length > 0 ? language : undefined,
     };
 
-    if (typeof currentMovie.tmdbId === 'number') payload.tmdbId = currentMovie.tmdbId;
-    if (typeof currentMovie.imdbId === 'string' && currentMovie.imdbId.length > 0) {
-      payload.imdbId = currentMovie.imdbId;
+    if (typeof currentSeries.tvdbId === 'number') {
+      payload.tvdbId = currentSeries.tvdbId;
     }
 
     const response = await requestJson<JackettSearchResponse>('/api/search/jackett', {
@@ -268,12 +435,14 @@ export default function MovieDetailsPage() {
     if (response.error) {
       setJackettError(response.error);
       setSearchingReleases(false);
+      setActiveSeasonSearch(null);
       return;
     }
 
     if (!response.data) {
       setJackettError('No response data received from Jackett search');
       setSearchingReleases(false);
+      setActiveSeasonSearch(null);
       return;
     }
 
@@ -281,17 +450,18 @@ export default function MovieDetailsPage() {
     setJackettFailures(response.data.failures || []);
 
     if ((response.data.results || []).length === 0) {
-      setJackettMessage('No releases found for this movie with the selected filters.');
+      setJackettMessage(`No releases found for "${query}".`);
     } else {
-      setJackettMessage(`Found ${response.data.total} release${response.data.total === 1 ? '' : 's'}.`);
+      setJackettMessage(`Found ${response.data.total} release${response.data.total === 1 ? '' : 's'} for "${query}".`);
     }
 
     setSearchingReleases(false);
+    setActiveSeasonSearch(null);
   };
 
   const sendReleaseToDeluge = async (release: JackettReleaseResult) => {
-    const currentMovie = movie();
-    if (!currentMovie) return;
+    const currentSeries = series();
+    if (!currentSeries) return;
 
     if (!release.downloadUrl) {
       setJackettError('This release does not include a downloadable torrent or magnet URL');
@@ -306,8 +476,8 @@ export default function MovieDetailsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: release.title,
-        mediaType: 'movie',
-        mediaId: currentMovie.id,
+        mediaType: 'tv',
+        mediaId: currentSeries.id,
         indexerId: release.indexerId > 0 ? release.indexerId : undefined,
         sourceUrl: release.downloadUrl,
         quality: release.categories[0] || undefined,
@@ -329,78 +499,164 @@ export default function MovieDetailsPage() {
     <MainLayout>
       <div class="movie-details-page">
         <header class="movie-details-header">
-          <button class="back-button" onClick={() => void navigate('/movies')}>
-            {'<- Back to Movies'}
+          <button class="back-button" onClick={() => void navigate('/tv')}>
+            {'<- Back to TV Shows'}
           </button>
-          <h1 class="section-title">Movie Details</h1>
+          <h1 class="section-title">TV Show Details</h1>
         </header>
 
         {loadError() && (
           <Card>
-            <p>Failed to load movie details: {loadError()}</p>
+            <p>Failed to load TV show details: {loadError()}</p>
           </Card>
         )}
 
-        {movie() && (
+        {series() && (
           <>
             <Card class="movie-details-card">
               <div class="movie-details-layout">
                 <div class="movie-details-poster">
-                  {movie()?.posterPath ? (
-                    <img src={movie()?.posterPath || ''} alt={movie()?.title || 'Movie poster'} />
+                  {series()?.posterPath ? (
+                    <img src={series()?.posterPath || ''} alt={series()?.title || 'TV show poster'} />
                   ) : (
                     <div class="poster-placeholder">
-                      <Film size={64} />
+                      <Tv size={64} />
                     </div>
                   )}
                 </div>
 
                 <div class="movie-details-content">
                   <div class="movie-details-title-row">
-                    <h2 class="movie-details-title">{movie()?.title}</h2>
-                    <div class="movie-details-title-actions">
-                      <Badge variant={movie()?.status === 'downloaded' ? 'success' : 'warning'}>
-                        {movie()?.status}
-                      </Badge>
-                      {movie()?.status === 'downloaded' && (
-                        <Button variant="secondary" size="sm" onClick={playMovie}>
-                          <Play size={14} />
-                          Play Movie
-                        </Button>
-                      )}
-                    </div>
+                    <h2 class="movie-details-title">{series()?.title}</h2>
+                    <Badge variant={resolveStatusVariant(series()?.status || 'wanted')}>
+                      {series()?.status}
+                    </Badge>
                   </div>
 
-                  {playbackError() && <p class="inline-feedback error">{playbackError()}</p>}
-
-                  {movie()?.originalTitle && movie()?.originalTitle !== movie()?.title && (
-                    <p class="movie-details-original-title">Original title: {movie()?.originalTitle}</p>
+                  {series()?.originalTitle && series()?.originalTitle !== series()?.title && (
+                    <p class="movie-details-original-title">Original title: {series()?.originalTitle}</p>
                   )}
 
                   <p class="movie-details-overview">
-                    {movie()?.overview || 'No overview is available for this movie yet.'}
+                    {series()?.overview || 'No overview is available for this TV show yet.'}
                   </p>
 
                   <div class="movie-details-meta">
                     <span class="meta-item">
                       <Calendar size={14} />
-                      Year: {formatReleaseYear(movie()?.releaseDate)}
-                    </span>
-                    <span class="meta-item">
-                      <Clock size={14} />
-                      Runtime: {formatRuntime(movie()?.runtime)}
+                      Year: {formatReleaseYear(series()?.releaseDate)}
                     </span>
                     <span class="meta-item">
                       <Hash size={14} />
-                      TMDB: {movie()?.tmdbId ?? 'n/a'}
+                      TVDB: {series()?.tvdbId ?? 'n/a'}
+                    </span>
+                    <span class="meta-item">
+                      <Tv size={14} />
+                      Seasons: {groupedSeasons().length}
                     </span>
                     <span class="meta-item">
                       <Hash size={14} />
-                      IMDb: {movie()?.imdbId || 'n/a'}
+                      Episodes: {series()?.episodes.length ?? 0}
+                    </span>
+                    <span class="meta-item">
+                      <Hash size={14} />
+                      Downloaded: {totalDownloadedEpisodes()}
                     </span>
                   </div>
                 </div>
               </div>
+            </Card>
+
+            <Card class="tv-seasons-card">
+              <CardHeader>
+                <CardTitle>Seasons & Episodes</CardTitle>
+              </CardHeader>
+
+              {playbackError() && <p class="inline-feedback error">{playbackError()}</p>}
+
+              {groupedSeasons().length === 0 ? (
+                <p class="jackett-empty">No episode metadata is available yet for this series.</p>
+              ) : (
+                <div class="tv-seasons-list">
+                  {groupedSeasons().map((seasonGroup) => (
+                    <Card class="tv-season-card" key={`season-${seasonGroup.season}`}>
+                      <div class="tv-season-header">
+                        <div>
+                          <h3 class="tv-season-title">
+                            {seasonGroup.season === 0 ? 'Specials' : `Season ${seasonGroup.season}`}{' '}
+                            <span class="tv-season-code">({formatSeasonCode(seasonGroup.season)})</span>
+                          </h3>
+                          <p class="tv-season-subtitle">
+                            {seasonGroup.totalCount} episode{seasonGroup.totalCount === 1 ? '' : 's'} | downloaded {seasonGroup.downloadedCount}
+                          </p>
+                        </div>
+
+                        <div class="tv-season-actions">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => playSeason(seasonGroup)}
+                            disabled={seasonGroup.downloadedCount === 0}
+                          >
+                            <Play size={14} />
+                            Play Season
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => void searchReleases(seasonGroup.season)}
+                            disabled={searchingReleases() || loadingFilters() || selectedIndexerIds().length === 0}
+                          >
+                            {searchingReleases() && activeSeasonSearch() === seasonGroup.season
+                              ? 'Searching...'
+                              : `Search ${formatSeasonCode(seasonGroup.season)}`}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setExpandedSeasonNumber((current) => (
+                              current === seasonGroup.season ? null : seasonGroup.season
+                            ))}
+                          >
+                            {expandedSeasonNumber() === seasonGroup.season ? 'Hide Episodes' : 'View Episodes'}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {expandedSeasonNumber() === seasonGroup.season && (
+                        <div class="tv-episodes-list">
+                          {seasonGroup.episodes.map((episode) => (
+                            <div class="tv-episode-row">
+                              <span class="tv-episode-code">
+                                {formatEpisodeCode(seasonGroup.season, episode.episode)}
+                              </span>
+                              <span class="tv-episode-title">
+                                {episode.title || `Episode ${episode.episode}`}
+                              </span>
+                              <span class="tv-episode-meta">
+                                Air date: {formatAirDate(episode.airDate)}
+                              </span>
+                              <Badge variant={isEpisodeDownloaded(episode.downloaded) ? 'success' : 'warning'}>
+                                {isEpisodeDownloaded(episode.downloaded) ? 'available locally' : 'wanted'}
+                              </Badge>
+                              {isEpisodeDownloaded(episode.downloaded) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => playEpisode(seasonGroup, episode)}
+                                >
+                                  <Play size={13} />
+                                  Play
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              )}
             </Card>
 
             <Card class="jackett-panel movie-jackett-panel">
@@ -410,7 +666,31 @@ export default function MovieDetailsPage() {
 
               <div class="movie-release-query">
                 <label>Release Query</label>
-                <Input value={releaseQuery()} onInput={setReleaseQuery} placeholder="Movie title or release keywords" />
+                <Input value={releaseQuery()} onInput={setReleaseQuery} placeholder="Series title or release keywords" />
+              </div>
+
+              <div class="movie-release-query">
+                <label>Season Quick Search (optional)</label>
+                {groupedSeasons().length === 0 ? (
+                  <Input
+                    value={selectedSeasonNumber()}
+                    onInput={setSelectedSeasonNumber}
+                    placeholder="e.g. 1 for Season 1 (uses S01 query)"
+                  />
+                ) : (
+                  <select
+                    class="input"
+                    value={selectedSeasonNumber()}
+                    onChange={(event) => setSelectedSeasonNumber(event.currentTarget.value)}
+                  >
+                    <option value="">Manual query only</option>
+                    {groupedSeasons().map((seasonGroup) => (
+                      <option value={String(seasonGroup.season)}>
+                        {seasonGroup.season === 0 ? 'Specials' : `Season ${seasonGroup.season}`} ({formatSeasonCode(seasonGroup.season)})
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div class="jackett-actions">
@@ -419,7 +699,7 @@ export default function MovieDetailsPage() {
                 </Button>
                 <Button
                   variant="primary"
-                  onClick={searchReleases}
+                  onClick={() => void searchReleases()}
                   disabled={searchingReleases() || loadingFilters() || selectedIndexerIds().length === 0}
                 >
                   {searchingReleases() ? 'Searching Releases...' : 'Search Releases'}

@@ -50,4 +50,17 @@ TODOs.md
 
 # Caches
 .eslintcache
+.cache/
+.turbo/
+
+# Runtime playback/cache artifacts
+/data/.playback-cache/
+
+# Generic temp/swap files
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
 Title \[MusicBrainz API\](docMusicBra.md

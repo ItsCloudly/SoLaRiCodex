@@ -13,6 +13,7 @@ export default function TVShows() {
   const series = () => seriesResult()?.data ?? [];
   const error = () => seriesResult()?.error;
   const openTvSearch = () => void navigate('/search?category=tv');
+  const openTvDetails = (seriesId: number) => void navigate(`/tv/${seriesId}`);
 
   return (
     <MainLayout>
@@ -63,7 +64,7 @@ export default function TVShows() {
             </div>
           ) : (
             series().map((show: any) => (
-              <Card class="series-card" key={show.id}>
+              <Card class="series-card" key={show.id} onClick={() => openTvDetails(show.id)}>
                 <div class="series-poster">
                   {show.posterPath ? (
                     <img src={show.posterPath} alt={show.title} />

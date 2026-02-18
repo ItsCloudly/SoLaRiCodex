@@ -6,6 +6,20 @@ import { count, desc, eq, or } from 'drizzle-orm';
 
 export const delugeRoutes = new Hono();
 
+type MediaType = 'movie' | 'tv' | 'music';
+
+const defaultDelugeLabels: Record<MediaType, string> = {
+  movie: 'Movies',
+  tv: 'TV',
+  music: 'Music',
+};
+
+const delugeLabelSettingKeys: Record<MediaType, string> = {
+  movie: 'deluge.label.movie',
+  tv: 'deluge.label.tv',
+  music: 'deluge.label.music',
+};
+
 const addTorrentSchema = z.object({
   title: z.string().trim().min(1),
   mediaType: z.enum(['movie', 'tv', 'music']),
@@ -36,6 +50,22 @@ async function getSettingValue(key: string): Promise<string | null> {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+async function resolveDelugeLabel(mediaType: MediaType): Promise<string> {
+  const configuredLabel = await getSettingValue(delugeLabelSettingKeys[mediaType]);
+  return configuredLabel || defaultDelugeLabels[mediaType];
+}
+
+function hasPlugin(plugins: string[], pluginName: string): boolean {
+  const lookup = pluginName.toLowerCase();
+  return plugins.some((plugin) => plugin.trim().toLowerCase() === lookup);
+}
+
+function isUnknownMethodError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes('unknown method') || message.includes('invalid method');
 }
 
 function extractSessionCookie(setCookieHeader: string | null): string | null {
@@ -159,6 +189,41 @@ async function ensureDelugeConnected(session: DelugeSession): Promise<void> {
   }
 }
 
+async function isLabelPluginReady(session: DelugeSession): Promise<boolean> {
+  try {
+    const enabledPlugins = await callDelugeRpc<string[]>(session, 'core.get_enabled_plugins', []);
+    if (hasPlugin(enabledPlugins, 'Label')) return true;
+
+    const availablePlugins = await callDelugeRpc<string[]>(session, 'core.get_available_plugins', []);
+    if (!hasPlugin(availablePlugins, 'Label')) {
+      return false;
+    }
+
+    await callDelugeRpc<unknown>(session, 'core.enable_plugin', ['Label']);
+    return true;
+  } catch (error) {
+    if (isUnknownMethodError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function assignLabelToTorrent(session: DelugeSession, torrentId: string, label: string): Promise<void> {
+  const labelPluginReady = await isLabelPluginReady(session);
+  if (!labelPluginReady) {
+    throw new Error('Deluge Label plugin is not available');
+  }
+
+  const labels = await callDelugeRpc<string[]>(session, 'label.get_labels', []);
+  const labelExists = labels.some((existingLabel) => existingLabel.trim().toLowerCase() === label.toLowerCase());
+  if (!labelExists) {
+    await callDelugeRpc<unknown>(session, 'label.add', [label]);
+  }
+
+  await callDelugeRpc<unknown>(session, 'label.set_torrent', [torrentId, label]);
+}
+
 function isMagnetLink(url: string): boolean {
   return url.toLowerCase().startsWith('magnet:');
 }
@@ -173,11 +238,151 @@ function extractTorrentHash(url: string): string | null {
   return null;
 }
 
+function isHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+
+function sanitizeTorrentFilename(value: string): string {
+  const stripped = value
+    .trim()
+    .replace(/^["']+/, '')
+    .replace(/["']+$/, '')
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_');
+
+  if (stripped.length === 0) return 'download.torrent';
+  return stripped.endsWith('.torrent') ? stripped : `${stripped}.torrent`;
+}
+
+function parseContentDispositionFilename(headerValue: string | null): string | null {
+  if (!headerValue) return null;
+
+  const utf8Match = headerValue.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim());
+    } catch {
+      return utf8Match[1].trim();
+    }
+  }
+
+  const quotedMatch = headerValue.match(/filename\s*=\s*"([^"]+)"/i);
+  if (quotedMatch?.[1]) return quotedMatch[1].trim();
+
+  const plainMatch = headerValue.match(/filename\s*=\s*([^;]+)/i);
+  if (plainMatch?.[1]) return plainMatch[1].trim();
+
+  return null;
+}
+
+function deriveTorrentFilename(sourceUrl: string, contentDisposition: string | null): string {
+  const fromHeader = parseContentDispositionFilename(contentDisposition);
+  if (fromHeader && fromHeader.length > 0) {
+    return sanitizeTorrentFilename(fromHeader);
+  }
+
+  try {
+    const parsed = new URL(sourceUrl);
+    const fileParamRaw = parsed.searchParams.get('file');
+    if (fileParamRaw && fileParamRaw.trim().length > 0) {
+      return sanitizeTorrentFilename(fileParamRaw.replace(/\+/g, ' '));
+    }
+
+    const pathSegments = parsed.pathname.split('/').filter((segment) => segment.length > 0);
+    const lastSegment = pathSegments[pathSegments.length - 1];
+    if (lastSegment && lastSegment.length > 0) {
+      return sanitizeTorrentFilename(lastSegment);
+    }
+  } catch {
+    // Fall through to default filename.
+  }
+
+  return 'download.torrent';
+}
+
+interface ResolvedTorrentSource {
+  magnetUrl?: string;
+  torrentFileName?: string;
+  torrentFileBase64?: string;
+}
+
+async function resolveTorrentSource(sourceUrl: string): Promise<ResolvedTorrentSource> {
+  if (isMagnetLink(sourceUrl)) {
+    return { magnetUrl: sourceUrl };
+  }
+
+  if (!isHttpUrl(sourceUrl)) {
+    throw new Error('Unsupported torrent source URL');
+  }
+
+  let currentUrl = sourceUrl;
+  const maxRedirects = 8;
+
+  for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
+    const response = await fetch(currentUrl, {
+      method: 'GET',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(20000),
+    });
+
+    if (isRedirectStatus(response.status)) {
+      const location = response.headers.get('location');
+      if (!location) {
+        throw new Error(`Torrent source redirect missing location (HTTP ${response.status})`);
+      }
+
+      let nextUrl: string;
+      try {
+        nextUrl = new URL(location, currentUrl).toString();
+      } catch {
+        throw new Error('Torrent source returned an invalid redirect URL');
+      }
+
+      if (isMagnetLink(nextUrl)) {
+        return { magnetUrl: nextUrl };
+      }
+
+      currentUrl = nextUrl;
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Torrent source responded with HTTP ${response.status}`);
+    }
+
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    if (contentType.includes('text/html')) {
+      const html = await response.text();
+      const magnetMatch = html.match(/magnet:\?xt=urn:btih:[^"'\\s<]+/i);
+      if (magnetMatch?.[0]) {
+        return { magnetUrl: magnetMatch[0] };
+      }
+      throw new Error('Torrent source returned HTML instead of torrent data');
+    }
+
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length === 0) {
+      throw new Error('Torrent source returned an empty file');
+    }
+
+    return {
+      torrentFileName: deriveTorrentFilename(currentUrl, response.headers.get('content-disposition')),
+      torrentFileBase64: bytes.toString('base64'),
+    };
+  }
+
+  throw new Error('Too many redirects while resolving torrent source URL');
+}
+
 async function tryAddToDelugeEndpoint(
   endpoint: string,
   password: string,
   sourceUrl: string,
-): Promise<{ delugeId: string | null; torrentHash: string | null }> {
+  label: string,
+): Promise<{ delugeId: string | null; torrentHash: string | null; labelWarning: string | null }> {
   const session: DelugeSession = {
     endpoint,
     cookie: null,
@@ -191,26 +396,51 @@ async function tryAddToDelugeEndpoint(
 
   await ensureDelugeConnected(session);
 
+  const resolvedSource = await resolveTorrentSource(sourceUrl);
   let delugeId: string | null = null;
-  if (isMagnetLink(sourceUrl)) {
-    delugeId = await callDelugeRpc<string | null>(session, 'core.add_torrent_magnet', [sourceUrl, {}]);
+  let hashReference = sourceUrl;
+
+  if (resolvedSource.magnetUrl) {
+    hashReference = resolvedSource.magnetUrl;
+    delugeId = await callDelugeRpc<string | null>(session, 'core.add_torrent_magnet', [resolvedSource.magnetUrl, {}]);
+  } else if (resolvedSource.torrentFileName && resolvedSource.torrentFileBase64) {
+    delugeId = await callDelugeRpc<string | null>(
+      session,
+      'core.add_torrent_file',
+      [resolvedSource.torrentFileName, resolvedSource.torrentFileBase64, {}],
+    );
   } else {
-    delugeId = await callDelugeRpc<string | null>(session, 'core.add_torrent_url', [sourceUrl, {}]);
+    throw new Error('Unable to resolve torrent source for Deluge');
   }
 
   if (delugeId === null || delugeId === undefined || String(delugeId).trim().length === 0) {
     throw new Error('Deluge did not return a torrent identifier');
   }
 
-  const torrentHash = extractTorrentHash(sourceUrl) || String(delugeId).trim();
+  const normalizedDelugeId = String(delugeId).trim();
+  let labelWarning: string | null = null;
+
+  try {
+    await assignLabelToTorrent(session, normalizedDelugeId, label);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown label error';
+    labelWarning = `Torrent added, but Deluge label "${label}" could not be applied (${message})`;
+  }
+
+  const torrentHash = extractTorrentHash(hashReference) || normalizedDelugeId;
   return {
-    delugeId: String(delugeId).trim(),
+    delugeId: normalizedDelugeId,
     torrentHash,
+    labelWarning,
   };
 }
 
-async function addToDeluge(sourceUrl: string): Promise<{ delugeId: string | null; torrentHash: string | null }> {
+async function addToDeluge(
+  sourceUrl: string,
+  mediaType: MediaType,
+): Promise<{ delugeId: string | null; torrentHash: string | null; labelWarning: string | null }> {
   const config = await resolveDelugeConnectionConfig();
+  const label = await resolveDelugeLabel(mediaType);
   const endpoints = config.port === 8112
     ? [normalizeDelugeEndpoint(config.host, config.port)]
     : [
@@ -221,7 +451,7 @@ async function addToDeluge(sourceUrl: string): Promise<{ delugeId: string | null
   let lastError: unknown = null;
   for (const endpoint of endpoints) {
     try {
-      return await tryAddToDelugeEndpoint(endpoint, config.password, sourceUrl);
+      return await tryAddToDelugeEndpoint(endpoint, config.password, sourceUrl, label);
     } catch (error) {
       lastError = error;
     }
@@ -279,12 +509,14 @@ delugeRoutes.post('/add-torrent', async (c) => {
 
   let delugeId = data.delugeId;
   let torrentHash = data.torrentHash;
+  let labelWarning: string | null = null;
 
   if (data.sourceUrl) {
     try {
-      const delugeResult = await addToDeluge(data.sourceUrl);
+      const delugeResult = await addToDeluge(data.sourceUrl, data.mediaType);
       delugeId = delugeId || delugeResult.delugeId || undefined;
       torrentHash = torrentHash || delugeResult.torrentHash || undefined;
+      labelWarning = delugeResult.labelWarning;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to send torrent to Deluge';
       if (message.includes('not configured') || message.includes('invalid')) {
@@ -307,9 +539,13 @@ delugeRoutes.post('/add-torrent', async (c) => {
     progress: 0,
   }).returning({ id: downloads.id });
 
+  const message = data.sourceUrl
+    ? (labelWarning || 'Torrent sent to Deluge and queued')
+    : 'Torrent queued';
+
   return c.json({
     id: result[0].id,
-    message: data.sourceUrl ? 'Torrent sent to Deluge and queued' : 'Torrent queued',
+    message,
   }, 201);
 });
 

@@ -46,6 +46,9 @@ export default function SettingsPage() {
     delugeHost: 'localhost',
     delugePort: '8112',
     delugePassword: '',
+    delugeMovieLabel: 'Movies',
+    delugeTvLabel: 'TV',
+    delugeMusicLabel: 'Music',
     musicBrainzBaseUrl: 'https://musicbrainz.org',
     musicBrainzUserAgent: 'SoLaRi/1.0 (admin@localhost)',
     discordEnabled: false,
@@ -75,6 +78,9 @@ export default function SettingsPage() {
         delugeHost: asString(settings['deluge.host'], form.delugeHost),
         delugePort: String(settings['deluge.port'] ?? form.delugePort),
         delugePassword: asString(settings['deluge.password'], form.delugePassword),
+        delugeMovieLabel: asString(settings['deluge.label.movie'], form.delugeMovieLabel),
+        delugeTvLabel: asString(settings['deluge.label.tv'], form.delugeTvLabel),
+        delugeMusicLabel: asString(settings['deluge.label.music'], form.delugeMusicLabel),
         musicBrainzBaseUrl: asString(settings['apis.musicbrainz.baseUrl'], form.musicBrainzBaseUrl),
         musicBrainzUserAgent: asString(settings['apis.musicbrainz.userAgent'], form.musicBrainzUserAgent),
         tmdbApiKey: asString(settings['apis.tmdb.apiKey'], form.tmdbApiKey),
@@ -126,6 +132,9 @@ export default function SettingsPage() {
       'deluge.host': form.delugeHost,
       'deluge.port': Number.parseInt(form.delugePort, 10) || 8112,
       'deluge.password': form.delugePassword,
+      'deluge.label.movie': form.delugeMovieLabel,
+      'deluge.label.tv': form.delugeTvLabel,
+      'deluge.label.music': form.delugeMusicLabel,
       'apis.musicbrainz.baseUrl': form.musicBrainzBaseUrl,
       'apis.musicbrainz.userAgent': form.musicBrainzUserAgent,
       'apis.tmdb.apiKey': form.tmdbApiKey,
@@ -368,6 +377,33 @@ export default function SettingsPage() {
                       value={form.delugePassword}
                       onInput={(value) => setForm('delugePassword', value)}
                       placeholder="Enter Deluge Web UI password"
+                    />
+                  </div>
+
+                  <div class="form-group">
+                    <label>Movie Label</label>
+                    <Input
+                      value={form.delugeMovieLabel}
+                      onInput={(value) => setForm('delugeMovieLabel', value)}
+                      placeholder="Movies"
+                    />
+                  </div>
+
+                  <div class="form-group">
+                    <label>TV Label</label>
+                    <Input
+                      value={form.delugeTvLabel}
+                      onInput={(value) => setForm('delugeTvLabel', value)}
+                      placeholder="TV"
+                    />
+                  </div>
+
+                  <div class="form-group">
+                    <label>Music Label</label>
+                    <Input
+                      value={form.delugeMusicLabel}
+                      onInput={(value) => setForm('delugeMusicLabel', value)}
+                      placeholder="Music"
                     />
                   </div>
                 </div>

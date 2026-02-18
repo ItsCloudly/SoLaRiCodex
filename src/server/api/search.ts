@@ -3,6 +3,12 @@ import { z } from 'zod';
 import { db } from '../db/connection';
 import { artists, indexers, media, movies, series, settings } from '../db/schema';
 import { eq } from 'drizzle-orm';
+import {
+  buildJackettTorznabEndpoint,
+  describeFetchError,
+  readHttpErrorDetail,
+  readTorznabError,
+} from './utils';
 
 export const searchRoutes = new Hono();
 
@@ -634,26 +640,24 @@ function parseJackettCaps(xml: string): JackettCaps {
   };
 }
 
-function buildJackettEndpoint(baseUrl: string): URL {
-  const normalizedBaseUrl = baseUrl.endsWith('/')
-    ? baseUrl
-    : `${baseUrl}/`;
-  return new URL('api/v2.0/indexers/all/results/torznab/api', normalizedBaseUrl);
-}
-
 async function fetchJackettCaps(indexerConfig: ResolvedIndexer): Promise<JackettCaps> {
-  const endpoint = buildJackettEndpoint(indexerConfig.baseUrl);
+  const endpoint = buildJackettTorznabEndpoint(indexerConfig.baseUrl);
   endpoint.searchParams.set('t', 'caps');
   if (indexerConfig.apiKey) {
     endpoint.searchParams.set('apikey', indexerConfig.apiKey);
   }
 
-  const response = await fetch(endpoint, { signal: AbortSignal.timeout(10000) });
+  const response = await fetch(endpoint, { signal: AbortSignal.timeout(20000) });
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    const detail = await readHttpErrorDetail(response);
+    throw new Error(detail ? `HTTP ${response.status}: ${detail}` : `HTTP ${response.status}`);
   }
 
   const xml = await response.text();
+  const torznabError = readTorznabError(xml);
+  if (torznabError) {
+    throw new Error(`Torznab error: ${torznabError}`);
+  }
   return parseJackettCaps(xml);
 }
 
@@ -733,7 +737,9 @@ function parseJackettItems(xml: string, indexerConfig: ResolvedIndexer): Jackett
 
     const enclosureUrl = parseEnclosureUrl(itemXml);
     const linkUrl = readTagText(itemXml, 'link');
-    const downloadUrl = enclosureUrl || attributes.downloadurl || attributes.magneturl || linkUrl || null;
+    // Prefer magnet links when available because Deluge can always consume them,
+    // while HTTP enclosure/download URLs can fail in remote or containerized setups.
+    const downloadUrl = attributes.magneturl || attributes.downloadurl || enclosureUrl || linkUrl || null;
     const infoUrl = readTagText(itemXml, 'comments') || linkUrl || null;
     const guid = readTagText(itemXml, 'guid') || downloadUrl || `${indexerConfig.id}:${title}`;
     const publishedAt = readTagText(itemXml, 'pubDate');
@@ -982,7 +988,7 @@ searchRoutes.get('/jackett/filters', async (c) => {
       const caps = await getJackettCaps(indexerConfig);
       return { indexerConfig, caps, error: null as string | null };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to fetch caps';
+      const message = describeFetchError(error);
       return { indexerConfig, caps: null as JackettCaps | null, error: message };
     }
   }));
@@ -1093,7 +1099,7 @@ searchRoutes.post('/jackett', async (c) => {
         throw new Error('Indexer does not support this media search type');
       }
 
-      const endpoint = buildJackettEndpoint(indexerConfig.baseUrl);
+      const endpoint = buildJackettTorznabEndpoint(indexerConfig.baseUrl);
       endpoint.searchParams.set('t', searchType.t);
       if (indexerConfig.apiKey) {
         endpoint.searchParams.set('apikey', indexerConfig.apiKey);
@@ -1131,16 +1137,21 @@ searchRoutes.post('/jackett', async (c) => {
 
       const response = await fetch(endpoint, { signal: AbortSignal.timeout(15000) });
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const detail = await readHttpErrorDetail(response);
+        throw new Error(detail ? `HTTP ${response.status}: ${detail}` : `HTTP ${response.status}`);
       }
 
       const xml = await response.text();
+      const torznabError = readTorznabError(xml);
+      if (torznabError) {
+        throw new Error(`Torznab error: ${torznabError}`);
+      }
       return parseJackettItems(xml, indexerConfig);
     } catch (error) {
       failures.push({
         indexerId: indexerConfig.id,
         indexerName: indexerConfig.name,
-        message: error instanceof Error ? error.message : 'Search failed',
+        message: describeFetchError(error),
       });
       return [] as JackettRelease[];
     }

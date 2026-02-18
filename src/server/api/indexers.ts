@@ -3,7 +3,13 @@ import { z } from 'zod';
 import { db } from '../db/connection';
 import { indexers } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import { parseIdParam } from './utils';
+import {
+  buildJackettTorznabEndpoint,
+  describeFetchError,
+  parseIdParam,
+  readHttpErrorDetail,
+  readTorznabError,
+} from './utils';
 
 export const indexersRoutes = new Hono();
 
@@ -38,27 +44,39 @@ interface TestConnectionResult {
 
 async function testIndexerConnection(baseUrl: string, apiKey?: string): Promise<TestConnectionResult> {
   try {
-    const normalizedBaseUrl = baseUrl.endsWith('/')
-      ? baseUrl
-      : `${baseUrl}/`;
-    const endpoint = new URL('api/v2.0/indexers/all/results/torznab/api', normalizedBaseUrl);
+    const endpoint = buildJackettTorznabEndpoint(baseUrl);
     endpoint.searchParams.set('t', 'caps');
     if (apiKey && apiKey.trim().length > 0) {
       endpoint.searchParams.set('apikey', apiKey.trim());
     }
 
-    const response = await fetch(endpoint, { signal: AbortSignal.timeout(5000) });
+    const response = await fetch(endpoint, { signal: AbortSignal.timeout(15000) });
     if (!response.ok) {
+      const detail = await readHttpErrorDetail(response);
       return {
         success: false,
-        message: `Indexer responded with HTTP ${response.status}`,
+        message: detail
+          ? `Indexer responded with HTTP ${response.status}: ${detail}`
+          : `Indexer responded with HTTP ${response.status}`,
+        status: 502,
+      };
+    }
+
+    const xml = await response.text();
+    const torznabError = readTorznabError(xml);
+    if (torznabError) {
+      return {
+        success: false,
+        message: `Jackett rejected the request: ${torznabError}`,
         status: 502,
       };
     }
 
     return { success: true, message: 'Connection successful', status: 200 };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Connection failed';
+    const timeoutMessage = 'Connection timed out after 15s. Jackett may be busy or unreachable.';
+    const detail = describeFetchError(error);
+    const message = /timeout|aborted/i.test(detail) ? timeoutMessage : detail;
     return { success: false, message, status: 502 };
   }
 }

@@ -1,6 +1,6 @@
 import { createAsync, useNavigate } from '@solidjs/router';
 import MainLayout from '~/components/layout/MainLayout';
-import { Card, Button, Badge } from '~/components/ui';
+import { Card, Button } from '~/components/ui';
 import { Music, Plus, Search, Filter, Disc } from 'lucide-solid';
 import { fetchJson } from '~/lib/api';
 
@@ -18,29 +18,31 @@ export default function MusicPage() {
     <MainLayout>
       <div class="music-page">
         <header class="page-header">
-          <Music size={28} class="header-icon" />
-          <div>
-            <h1 class="section-title">Music</h1>
-            <p class="header-subtitle">{artists().length} artists in library</p>
+          <div class="header-title">
+            <Music size={28} class="header-icon" />
+            <div>
+              <h1 class="section-title">Music</h1>
+              <p class="header-subtitle">{artists().length} artists in library</p>
+            </div>
+          </div>
+
+          <div class="header-actions">
+            <div class="search-box">
+              <Search size={18} />
+              <input type="text" placeholder="Search artists..." class="input" />
+            </div>
+
+            <Button variant="ghost">
+              <Filter size={18} />
+              Filter
+            </Button>
+
+            <Button variant="primary" onClick={openMusicSearch}>
+              <Plus size={18} />
+              Add Artist
+            </Button>
           </div>
         </header>
-
-        <div class="header-actions">
-          <div class="search-box">
-            <Search size={18} />
-            <input type="text" placeholder="Search artists..." class="input" />
-          </div>
-
-          <Button variant="ghost">
-            <Filter size={18} />
-            Filter
-          </Button>
-
-          <Button variant="primary" onClick={openMusicSearch}>
-            <Plus size={18} />
-            Add Artist
-          </Button>
-        </div>
 
         {error() && (
           <Card>
@@ -74,11 +76,6 @@ export default function MusicPage() {
                       <Music size={48} />
                     </div>
                   )}
-                  <div class="artist-overlay">
-                    <Badge variant={artist.status === 'downloaded' ? 'success' : 'warning'}>
-                      {artist.status}
-                    </Badge>
-                  </div>
                 </div>
 
                 <div class="artist-info">

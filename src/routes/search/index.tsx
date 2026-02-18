@@ -249,6 +249,9 @@ export default function SearchPage() {
 
     if (category === 'tv') {
       endpoint = '/api/media/tv';
+      if (typeof result.tmdbId === 'number') {
+        payload.tmdbId = result.tmdbId;
+      }
     }
 
     if (category === 'music') {

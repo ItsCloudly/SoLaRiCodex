@@ -31,6 +31,13 @@ function getErrorMessage(payload: unknown, fallbackStatus: number): string {
     }
   }
 
+  if (payload && typeof payload === 'object' && 'message' in payload) {
+    const message = (payload as { message?: unknown }).message;
+    if (typeof message === 'string' && message.length > 0) {
+      return message;
+    }
+  }
+
   return `Request failed (${fallbackStatus})`;
 }
 
