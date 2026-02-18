@@ -10,7 +10,7 @@ import {
   Show,
   useContext,
 } from 'solid-js';
-import { Disc3, Expand, Minimize2, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX, X } from 'lucide-solid';
+import { Disc3, Expand, GripVertical, Minimize2, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX, X } from 'lucide-solid';
 import { requestJson } from '~/lib/api';
 
 export type PlayerMediaType = 'video' | 'audio';
@@ -54,6 +54,7 @@ interface MediaPlayerContextValue {
   openItem: (item: PlayerQueueItem) => void;
   openPlaylist: (items: PlayerQueueItem[], startIndex?: number) => void;
   appendToQueue: (item: PlayerQueueItem) => boolean;
+  moveQueueItem: (fromIndex: number, toIndex: number) => void;
   playAt: (index: number) => void;
   playNext: () => void;
   playPrevious: () => void;
@@ -110,6 +111,9 @@ export function MediaPlayerPanel() {
   const [artworkLoadFailed, setArtworkLoadFailed] = createSignal(false);
   const [isOpeningExternal, setIsOpeningExternal] = createSignal(false);
   const [compatibilitySeekBaseSeconds, setCompatibilitySeekBaseSeconds] = createSignal(0);
+  const [showLibraryPicker, setShowLibraryPicker] = createSignal(false);
+  const [draggingIndex, setDraggingIndex] = createSignal<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = createSignal<number | null>(null);
 
   let videoRef: HTMLVideoElement | undefined;
   let audioRef: HTMLAudioElement | undefined;
@@ -360,6 +364,17 @@ export function MediaPlayerPanel() {
     }
 
     setPlaylistFeedback(`Added: ${item.title}`);
+  };
+
+  const openLibraryPicker = () => {
+    setShowLibraryPicker(true);
+    void loadPlaybackLibrary();
+  };
+
+  const closeLibraryPicker = () => {
+    setShowLibraryPicker(false);
+    setLibraryQuery('');
+    setPlaylistFeedback(null);
   };
 
   const playCurrent = async () => {
@@ -704,9 +719,52 @@ export function MediaPlayerPanel() {
         {player.queue().map((item, index) => (
           <button
             type="button"
-            class={`media-player-playlist-item ${index === player.currentIndex() ? 'active' : ''}`}
+            class={`media-player-playlist-item ${index === player.currentIndex() ? 'active' : ''} ${draggingIndex() === index ? 'dragging' : ''} ${dragOverIndex() === index ? 'drag-over' : ''}`}
             onClick={() => void jumpToIndex(index)}
+            onDragOver={(event) => {
+              event.preventDefault();
+              if (dragOverIndex() !== index) {
+                setDragOverIndex(index);
+              }
+            }}
+            onDragLeave={() => {
+              if (dragOverIndex() === index) {
+                setDragOverIndex(null);
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              const raw = event.dataTransfer?.getData('application/x-solari-queue-index')
+                || event.dataTransfer?.getData('text/plain');
+              const fromIndex = raw ? Number.parseInt(raw, 10) : NaN;
+              if (!Number.isFinite(fromIndex)) return;
+              if (fromIndex === index) return;
+              player.moveQueueItem(fromIndex, index);
+              setDraggingIndex(null);
+              setDragOverIndex(null);
+            }}
           >
+            <span
+              class="media-player-drag-handle"
+              draggable={true}
+              aria-label="Drag to reorder"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+              onDragStart={(event) => {
+                event.stopPropagation();
+                setDraggingIndex(index);
+                setDragOverIndex(null);
+                event.dataTransfer?.setData('text/plain', String(index));
+                event.dataTransfer?.setDragImage(event.currentTarget, 8, 8);
+                event.dataTransfer?.setData('application/x-solari-queue-index', String(index));
+              }}
+              onDragEnd={() => {
+                setDraggingIndex(null);
+                setDragOverIndex(null);
+              }}
+            >
+              <GripVertical size={12} strokeWidth={1.6} />
+            </span>
             <span class="media-player-playlist-index">{String(index + 1).padStart(2, '0')}</span>
             <span class="media-player-playlist-labels">
               <span>{item.title}</span>
@@ -723,54 +781,18 @@ export function MediaPlayerPanel() {
           </button>
         ))}
       </div>
-
-      <div class="media-player-playlist-add">
-        <div class="media-player-playlist-search-row">
-          <input
-            id="playlist-library-search"
-            class="input"
-            type="search"
-            value={libraryQuery()}
-            onInput={(event) => setLibraryQuery(event.currentTarget.value)}
-            placeholder={`Search ${playlistKindLabel()}...`}
-          />
-          <button
-            type="button"
-            class="media-player-icon-button"
-            onClick={() => void loadPlaybackLibrary()}
-            disabled={isLoadingLibrary()}
-          >
-            {isLoadingLibrary() ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
-        <Show when={!isLoadingLibrary() && filteredLibraryItems().length > 0}>
-          <div class="media-player-library-results">
-            {filteredLibraryItems().map((item) => (
-              <div class="media-player-library-item">
-                <div class="media-player-library-item-labels">
-                  <span>{item.title}</span>
-                  <Show when={item.subtitle}>
-                    <small>{item.subtitle}</small>
-                  </Show>
-                </div>
-                <button
-                  type="button"
-                  class="media-player-icon-button"
-                  onClick={() => addLibraryItemToPlaylist(item)}
-                >
-                  Add
-                </button>
-              </div>
-            ))}
-          </div>
-        </Show>
-        <Show when={libraryError()}>
-          <p class="media-player-error">{libraryError()}</p>
-        </Show>
-        <Show when={playlistFeedback()}>
-          <p class="media-player-playlist-feedback">{playlistFeedback()}</p>
-        </Show>
+      <div class="media-player-playlist-footer">
+        <button
+          type="button"
+          class="media-player-add-button"
+          onClick={openLibraryPicker}
+        >
+          Add more +
+        </button>
       </div>
+      <Show when={playlistFeedback()}>
+        <p class="media-player-playlist-feedback">{playlistFeedback()}</p>
+      </Show>
     </section>
   );
 
@@ -949,24 +971,34 @@ export function MediaPlayerPanel() {
           <Show when={player.currentItem()?.mediaType === 'audio'}>
             <div class="media-player-audio-layout">
               <div class="media-player-audio-stage">
-                <Show
-                  when={player.currentItem()?.artworkUrl && !artworkLoadFailed()}
-                  fallback={(
-                    <div class="media-player-audio-artwork media-player-audio-artwork-fallback" aria-hidden="true">
-                      <Disc3 size={54} />
-                    </div>
-                  )}
-                >
-                  <img
-                    class="media-player-audio-artwork"
-                    src={player.currentItem()?.artworkUrl || ''}
-                    alt={`${player.currentItem()?.subtitle || player.currentItem()?.title || 'Album'} artwork`}
-                    onError={() => setArtworkLoadFailed(true)}
-                  />
-                </Show>
+                <div class="media-player-audio-card">
+                  <Show
+                    when={player.currentItem()?.artworkUrl && !artworkLoadFailed()}
+                    fallback={(
+                      <div class="media-player-audio-artwork media-player-audio-artwork-fallback" aria-hidden="true">
+                        <Disc3 size={54} />
+                      </div>
+                    )}
+                  >
+                    <img
+                      class="media-player-audio-artwork"
+                      src={player.currentItem()?.artworkUrl || ''}
+                      alt={`${player.currentItem()?.subtitle || player.currentItem()?.title || 'Album'} artwork`}
+                      onError={() => setArtworkLoadFailed(true)}
+                    />
+                  </Show>
+                  <div class="media-player-audio-caption">
+                    <h4>{player.currentItem()?.title}</h4>
+                    <Show when={player.currentItem()?.subtitle}>
+                      <p>{player.currentItem()?.subtitle}</p>
+                    </Show>
+                  </div>
+                </div>
               </div>
               <Show when={showPlaylist()}>
-                {renderPlaylistSection('side')}
+                <div class="media-player-playlist-card">
+                  {renderPlaylistSection('side')}
+                </div>
               </Show>
             </div>
           </Show>
@@ -1047,6 +1079,66 @@ export function MediaPlayerPanel() {
           <Show when={showPlaylist() && player.currentItem()?.mediaType !== 'audio'}>
             {renderPlaylistSection()}
           </Show>
+          <Show when={showLibraryPicker()}>
+            <div class="media-player-modal-backdrop" onClick={closeLibraryPicker}>
+              <div class="media-player-modal" onClick={(event) => event.stopPropagation()}>
+                <div class="media-player-modal-header">
+                  <h4>Add to Playlist</h4>
+                  <button type="button" class="media-player-icon-button" onClick={closeLibraryPicker}>
+                    <X size={14} />
+                  </button>
+                </div>
+                <div class="media-player-playlist-search-row">
+                  <input
+                    id="playlist-library-search"
+                    class="input"
+                    type="search"
+                    value={libraryQuery()}
+                    onInput={(event) => setLibraryQuery(event.currentTarget.value)}
+                    placeholder={`Search ${playlistKindLabel()}...`}
+                  />
+                  <button
+                    type="button"
+                    class="media-player-icon-button"
+                    onClick={() => void loadPlaybackLibrary()}
+                    disabled={isLoadingLibrary()}
+                  >
+                    {isLoadingLibrary() ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
+                <Show when={libraryError()}>
+                  <p class="media-player-error">{libraryError()}</p>
+                </Show>
+                <Show when={!isLoadingLibrary() && filteredLibraryItems().length === 0}>
+                  <p class="media-player-playlist-empty">No matching tracks found.</p>
+                </Show>
+                <Show when={!isLoadingLibrary() && filteredLibraryItems().length > 0}>
+                  <div class="media-player-library-results">
+                    {filteredLibraryItems().map((item) => (
+                      <div class="media-player-library-item">
+                        <div class="media-player-library-item-labels">
+                          <span>{item.title}</span>
+                          <Show when={item.subtitle}>
+                            <small>{item.subtitle}</small>
+                          </Show>
+                        </div>
+                        <button
+                          type="button"
+                          class="media-player-icon-button"
+                          onClick={() => addLibraryItemToPlaylist(item)}
+                        >
+                          Add
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </Show>
+                <Show when={playlistFeedback()}>
+                  <p class="media-player-playlist-feedback">{playlistFeedback()}</p>
+                </Show>
+              </div>
+            </div>
+          </Show>
         </div>
       </div>
     </Show>
@@ -1084,6 +1176,33 @@ export function MediaPlayerProvider(props: { children: JSX.Element }) {
 
     setQueue([...currentQueue, item]);
     return true;
+  };
+
+  const moveQueueItem = (fromIndex: number, toIndex: number) => {
+    const currentQueue = queue();
+    if (fromIndex < 0 || toIndex < 0) return;
+    if (fromIndex >= currentQueue.length || toIndex >= currentQueue.length) return;
+    if (fromIndex === toIndex) return;
+
+    const nextQueue = [...currentQueue];
+    const [moved] = nextQueue.splice(fromIndex, 1);
+    nextQueue.splice(toIndex, 0, moved);
+    setQueue(nextQueue);
+
+    const active = currentIndex();
+    if (active === fromIndex) {
+      setCurrentIndex(toIndex);
+      return;
+    }
+
+    if (fromIndex < active && toIndex >= active) {
+      setCurrentIndex(active - 1);
+      return;
+    }
+
+    if (fromIndex > active && toIndex <= active) {
+      setCurrentIndex(active + 1);
+    }
   };
 
   const playAt = (index: number) => {
@@ -1125,6 +1244,7 @@ export function MediaPlayerProvider(props: { children: JSX.Element }) {
     openItem,
     openPlaylist,
     appendToQueue,
+    moveQueueItem,
     playAt,
     playNext,
     playPrevious,

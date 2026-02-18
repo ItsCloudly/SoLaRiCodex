@@ -1,6 +1,6 @@
 import { createAsync, useNavigate, useParams } from '@solidjs/router';
 import { createEffect, createSignal } from 'solid-js';
-import { Film, Calendar, Clock, Hash, Play } from 'lucide-solid';
+import { Film, Calendar, Clock, Hash, Play, FolderOpen, Plus } from 'lucide-solid';
 import MainLayout from '~/components/layout/MainLayout';
 import { useMediaPlayer } from '~/components/player/MediaPlayerProvider';
 import { Badge, Button, Card, CardHeader, CardTitle, Input } from '~/components/ui';
@@ -115,6 +115,16 @@ export default function MovieDetailsPage() {
 
   const movie = () => movieResult()?.data;
   const loadError = () => movieResult()?.error;
+  const [initializedMovieId, setInitializedMovieId] = createSignal<number | null>(null);
+  const [movieOverride, setMovieOverride] = createSignal<Partial<MovieDetails>>({});
+  const movieData = () => {
+    const base = movie();
+    return base ? { ...base, ...movieOverride() } : undefined;
+  };
+  const hasLocalPath = () => {
+    const current = movieData();
+    return typeof current?.path === 'string' && current.path.trim().length > 0;
+  };
 
   const [releaseQuery, setReleaseQuery] = createSignal('');
   const [loadingFilters, setLoadingFilters] = createSignal(false);
@@ -130,18 +140,32 @@ export default function MovieDetailsPage() {
   const [jackettMessage, setJackettMessage] = createSignal<string | null>(null);
   const [jackettError, setJackettError] = createSignal<string | null>(null);
   const [playbackError, setPlaybackError] = createSignal<string | null>(null);
+  const [manualPath, setManualPath] = createSignal('');
+  const [locatingPath, setLocatingPath] = createSignal(false);
+  const [locateMessage, setLocateMessage] = createSignal<string | null>(null);
+  const [locateError, setLocateError] = createSignal<string | null>(null);
+  const [showLocalPanel, setShowLocalPanel] = createSignal(false);
 
   createEffect(() => {
     const currentMovie = movie();
     if (!currentMovie) return;
+    if (initializedMovieId() === currentMovie.id) return;
+
+    setInitializedMovieId(currentMovie.id);
+    setMovieOverride({});
     setReleaseQuery((previous) => (previous.trim().length === 0 ? currentMovie.title : previous));
+    setManualPath(currentMovie.path || '');
     setPlaybackError(null);
+    setLocateMessage(null);
+    setLocateError(null);
+    setShowLocalPanel(false);
   });
 
   const playMovie = () => {
-    const currentMovie = movie();
+    const currentMovie = movieData();
     if (!currentMovie) return;
-    if (currentMovie.status !== 'downloaded') {
+    const hasLocalPath = typeof currentMovie.path === 'string' && currentMovie.path.trim().length > 0;
+    if (currentMovie.status !== 'downloaded' && !hasLocalPath) {
       setPlaybackError('This movie is not marked as downloaded yet.');
       return;
     }
@@ -290,7 +314,7 @@ export default function MovieDetailsPage() {
   };
 
   const sendReleaseToDeluge = async (release: JackettReleaseResult) => {
-    const currentMovie = movie();
+    const currentMovie = movieData();
     if (!currentMovie) return;
 
     if (!release.downloadUrl) {
@@ -325,6 +349,40 @@ export default function MovieDetailsPage() {
     setSendingToDelugeId(null);
   };
 
+  const handleLocatePath = async () => {
+    const currentMovie = movieData();
+    if (!currentMovie) return;
+
+    const pathValue = manualPath().trim();
+    if (!pathValue) {
+      setLocateError('Enter a folder or file path before linking.');
+      return;
+    }
+
+    setLocatingPath(true);
+    setLocateError(null);
+    setLocateMessage(null);
+
+    const response = await requestJson<{ message: string }>(`/api/media/movies/${currentMovie.id}/locate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: pathValue }),
+    });
+
+    if (response.error) {
+      setLocateError(response.error);
+      setLocatingPath(false);
+      return;
+    }
+
+    setLocateMessage(response.data?.message || 'Movie path linked.');
+    setMovieOverride({
+      status: 'downloaded',
+      path: pathValue,
+    });
+    setLocatingPath(false);
+  };
+
   return (
     <MainLayout>
       <div class="movie-details-page">
@@ -346,8 +404,8 @@ export default function MovieDetailsPage() {
             <Card class="movie-details-card">
               <div class="movie-details-layout">
                 <div class="movie-details-poster">
-                  {movie()?.posterPath ? (
-                    <img src={movie()?.posterPath || ''} alt={movie()?.title || 'Movie poster'} />
+                  {movieData()?.posterPath ? (
+                    <img src={movieData()?.posterPath || ''} alt={movieData()?.title || 'Movie poster'} />
                   ) : (
                     <div class="poster-placeholder">
                       <Film size={64} />
@@ -357,12 +415,12 @@ export default function MovieDetailsPage() {
 
                 <div class="movie-details-content">
                   <div class="movie-details-title-row">
-                    <h2 class="movie-details-title">{movie()?.title}</h2>
+                    <h2 class="movie-details-title">{movieData()?.title}</h2>
                     <div class="movie-details-title-actions">
-                      <Badge variant={movie()?.status === 'downloaded' ? 'success' : 'warning'}>
-                        {movie()?.status}
+                      <Badge variant={movieData()?.status === 'downloaded' ? 'success' : 'warning'}>
+                        {movieData()?.status}
                       </Badge>
-                      {movie()?.status === 'downloaded' && (
+                      {(movieData()?.status === 'downloaded' || hasLocalPath()) && (
                         <Button variant="secondary" size="sm" onClick={playMovie}>
                           <Play size={14} />
                           Play Movie
@@ -373,35 +431,78 @@ export default function MovieDetailsPage() {
 
                   {playbackError() && <p class="inline-feedback error">{playbackError()}</p>}
 
-                  {movie()?.originalTitle && movie()?.originalTitle !== movie()?.title && (
-                    <p class="movie-details-original-title">Original title: {movie()?.originalTitle}</p>
+                  {movieData()?.originalTitle && movieData()?.originalTitle !== movieData()?.title && (
+                    <p class="movie-details-original-title">Original title: {movieData()?.originalTitle}</p>
                   )}
 
                   <p class="movie-details-overview">
-                    {movie()?.overview || 'No overview is available for this movie yet.'}
+                    {movieData()?.overview || 'No overview is available for this movie yet.'}
                   </p>
 
                   <div class="movie-details-meta">
                     <span class="meta-item">
                       <Calendar size={14} />
-                      Year: {formatReleaseYear(movie()?.releaseDate)}
+                      Year: {formatReleaseYear(movieData()?.releaseDate)}
                     </span>
                     <span class="meta-item">
                       <Clock size={14} />
-                      Runtime: {formatRuntime(movie()?.runtime)}
+                      Runtime: {formatRuntime(movieData()?.runtime)}
                     </span>
                     <span class="meta-item">
                       <Hash size={14} />
-                      TMDB: {movie()?.tmdbId ?? 'n/a'}
+                      TMDB: {movieData()?.tmdbId ?? 'n/a'}
                     </span>
                     <span class="meta-item">
                       <Hash size={14} />
-                      IMDb: {movie()?.imdbId || 'n/a'}
+                      IMDb: {movieData()?.imdbId || 'n/a'}
                     </span>
+                  </div>
+
+                  <div class="local-media-actions">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowLocalPanel((current) => !current)}
+                    >
+                      <Plus size={14} />
+                    </Button>
                   </div>
                 </div>
               </div>
             </Card>
+
+            {showLocalPanel() && (
+              <Card class="local-media-card">
+                <CardHeader>
+                  <CardTitle>Local File Location</CardTitle>
+                </CardHeader>
+
+                <div class="local-media-form">
+                  <div class="form-group">
+                    <label>Folder or File Path</label>
+                    <Input
+                      value={manualPath()}
+                      onInput={setManualPath}
+                      placeholder="e.g. D:\\Media\\Movies\\The Matrix (1999)"
+                    />
+                  </div>
+
+                  <div class="local-media-actions">
+                    <Button
+                      variant="secondary"
+                      onClick={handleLocatePath}
+                      disabled={locatingPath()}
+                    >
+                      <FolderOpen size={14} />
+                      {locatingPath() ? 'Linking...' : 'Link Local Folder'}
+                    </Button>
+                  </div>
+
+                  {locateError() && <p class="inline-feedback error">{locateError()}</p>}
+                  {locateMessage() && <p class="inline-feedback success">{locateMessage()}</p>}
+                </div>
+              </Card>
+            )}
 
             <Card class="jackett-panel movie-jackett-panel">
               <CardHeader>

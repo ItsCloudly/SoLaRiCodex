@@ -318,6 +318,53 @@ function normalizedContainsAllTokens(
   return true;
 }
 
+function scoreTitleMatch(
+  normalizedCandidate: string,
+  normalizedTitle: string,
+  releaseYear: number | null,
+): number {
+  if (normalizedCandidate.length === 0 || normalizedTitle.length === 0) return -1;
+  const isShortTitle = normalizedTitle.length <= 3;
+  let score = 0;
+
+  if (normalizedCandidate.includes(normalizedTitle)) {
+    score += isShortTitle ? 20 : 80;
+  }
+
+  if (normalizedContainsAllTokens(normalizedCandidate, normalizedTitle)) {
+    score += 50;
+  }
+
+  if (normalizedCandidate.startsWith(normalizedTitle)) {
+    score += 10;
+  }
+
+  if (releaseYear !== null && normalizedCandidate.includes(String(releaseYear))) {
+    score += 15;
+  }
+
+  return score;
+}
+
+function findBestTitleMatch(
+  scannedFiles: ScannedMediaFile[],
+  normalizedTitle: string,
+  releaseYear: number | null,
+): ScannedMediaFile | null {
+  let best: ScannedMediaFile | null = null;
+  let bestScore = -1;
+
+  for (const candidate of scannedFiles) {
+    const score = scoreTitleMatch(candidate.normalizedCandidate, normalizedTitle, releaseYear);
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+
+  return bestScore >= 60 ? best : null;
+}
+
 function resolveConfiguredPath(rawPath: string): string {
   if (path.isAbsolute(rawPath)) return rawPath;
   return path.resolve(process.cwd(), rawPath);
@@ -414,15 +461,22 @@ async function collectMediaFiles(
 async function collectSeriesEpisodeFileMatches(
   rootPath: string,
   seriesTitle: string,
+  requireTitleMatch = true,
 ): Promise<Map<string, string>> {
   const normalizedTitle = normalizeTitleForMatch(seriesTitle);
-  if (normalizedTitle.length === 0) return new Map();
+  if (normalizedTitle.length === 0 && requireTitleMatch) return new Map();
 
   const matches = new Map<string, string>();
   const scannedVideoFiles = await collectMediaFiles(rootPath, VIDEO_FILE_EXTENSIONS);
 
   for (const scannedFile of scannedVideoFiles) {
-    if (!scannedFile.normalizedCandidate.includes(normalizedTitle)) continue;
+    if (requireTitleMatch) {
+      const titleMatches = (
+        scannedFile.normalizedCandidate.includes(normalizedTitle)
+        || normalizedContainsAllTokens(scannedFile.normalizedCandidate, normalizedTitle)
+      );
+      if (!titleMatches) continue;
+    }
 
     const episodeMarkers = parseEpisodeMarkersFromFileName(scannedFile.fileName);
     for (const marker of episodeMarkers) {
@@ -729,9 +783,15 @@ async function syncSeriesEpisodesFromFilesystem(
   const uniqueRoots = Array.from(new Set(rootCandidates));
   if (uniqueRoots.length === 0) return { updatedCount: 0 };
 
+  const resolvedSeriesPath = seriesPath ? resolveConfiguredPath(seriesPath.trim()) : null;
   const fileMatches = new Map<string, string>();
   for (const rootPath of uniqueRoots) {
-    const matchesForRoot = await collectSeriesEpisodeFileMatches(rootPath, seriesTitle);
+    const isPreferredSeriesRoot = resolvedSeriesPath === rootPath;
+    const matchesForRoot = await collectSeriesEpisodeFileMatches(
+      rootPath,
+      seriesTitle,
+      !isPreferredSeriesRoot,
+    );
     for (const [key, matchedPath] of matchesForRoot.entries()) {
       if (!fileMatches.has(key)) {
         fileMatches.set(key, matchedPath);
@@ -813,6 +873,16 @@ function parseTrackTitleFromFileName(fileName: string): string {
     .trim();
   const cleaned = cleanMusicNameSegment(withoutLeadingNumber);
   return cleaned.length > 0 ? cleaned : stem.trim();
+}
+
+function inferAlbumTitleFromDirectoryPath(directoryPath: string): { title: string | null; releaseYear: number | null } {
+  const rawName = path.basename(directoryPath).trim();
+  if (!rawName) return { title: null, releaseYear: null };
+
+  const cleaned = cleanMusicNameSegment(rawName);
+  const title = cleaned.length > 0 ? cleaned : rawName;
+  const releaseYear = extractYearFromDirectoryName(rawName);
+  return { title, releaseYear };
 }
 
 function extractYearFromDirectoryName(value: string): number | null {
@@ -1161,6 +1231,7 @@ async function syncMoviesFromFilesystem(): Promise<{ updatedCount: number }> {
     .select({
       movieId: movies.id,
       title: media.title,
+      releaseDate: movies.releaseDate,
       status: movies.status,
       path: movies.path,
     })
@@ -1172,7 +1243,8 @@ async function syncMoviesFromFilesystem(): Promise<{ updatedCount: number }> {
     const normalizedTitle = normalizeTitleForMatch(movieRow.title);
     if (normalizedTitle.length === 0) continue;
 
-    const matchedFile = scannedMovieFiles.find((file) => file.normalizedCandidate.includes(normalizedTitle));
+    const releaseYear = deriveYear(movieRow.releaseDate || null);
+    const matchedFile = findBestTitleMatch(scannedMovieFiles, normalizedTitle, releaseYear);
     if (matchedFile) {
       const nextPath = matchedFile.directoryPath;
       if (movieRow.status === 'downloaded' && movieRow.path === nextPath) continue;
@@ -1201,6 +1273,193 @@ async function syncMoviesFromFilesystem(): Promise<{ updatedCount: number }> {
   }
 
   return { updatedCount };
+}
+
+async function syncArtistFromFilesystem(
+  artistRecordId: number,
+  artistRootPath: string,
+): Promise<{ createdAlbums: number; createdTracks: number; updatedTracks: number }> {
+  const scannedAudioFiles = await collectMediaFiles(artistRootPath, AUDIO_FILE_EXTENSIONS);
+  if (scannedAudioFiles.length === 0) {
+    return { createdAlbums: 0, createdTracks: 0, updatedTracks: 0 };
+  }
+
+  const albumRows = await db
+    .select({
+      albumId: albums.id,
+      title: media.title,
+      status: albums.status,
+      path: albums.path,
+    })
+    .from(albums)
+    .innerJoin(media, eq(albums.mediaId, media.id))
+    .where(eq(albums.artistId, artistRecordId));
+
+  const albumIdByNormalizedTitle = new Map<string, number>();
+  for (const row of albumRows) {
+    const normalizedAlbumTitle = normalizeTitleForMatch(row.title);
+    if (normalizedAlbumTitle.length === 0) continue;
+    albumIdByNormalizedTitle.set(normalizedAlbumTitle, row.albumId);
+  }
+
+  const albumIds = albumRows.map((row) => row.albumId);
+  const tracksByAlbumId = new Map<number, ExistingTrackForSync[]>();
+
+  if (albumIds.length > 0) {
+    const trackRows = await db
+      .select({
+        trackId: tracks.id,
+        mediaId: tracks.mediaId,
+        albumId: tracks.albumId,
+        trackNumber: tracks.trackNumber,
+        title: media.title,
+        downloaded: tracks.downloaded,
+        filePath: tracks.filePath,
+      })
+      .from(tracks)
+      .innerJoin(media, eq(tracks.mediaId, media.id))
+      .where(inArray(tracks.albumId, albumIds));
+
+    for (const row of trackRows) {
+      const existing = tracksByAlbumId.get(row.albumId);
+      const mappedRow: ExistingTrackForSync = {
+        trackId: row.trackId,
+        mediaId: row.mediaId,
+        trackNumber: typeof row.trackNumber === 'number' ? row.trackNumber : null,
+        title: row.title,
+        downloaded: row.downloaded,
+        filePath: row.filePath,
+      };
+      if (existing) {
+        existing.push(mappedRow);
+      } else {
+        tracksByAlbumId.set(row.albumId, [mappedRow]);
+      }
+    }
+  }
+
+  const filesByDirectory = new Map<string, ScannedMediaFile[]>();
+  for (const file of scannedAudioFiles) {
+    const existing = filesByDirectory.get(file.directoryPath);
+    if (existing) {
+      existing.push(file);
+    } else {
+      filesByDirectory.set(file.directoryPath, [file]);
+    }
+  }
+
+  let createdAlbums = 0;
+  let createdTracks = 0;
+  let updatedTracks = 0;
+
+  for (const [directoryPath, albumFiles] of filesByDirectory.entries()) {
+    if (albumFiles.length === 0) continue;
+    const inferred = inferAlbumTitleFromDirectoryPath(directoryPath);
+    if (!inferred.title) continue;
+
+    const normalizedAlbumTitle = normalizeTitleForMatch(inferred.title);
+    if (normalizedAlbumTitle.length === 0) continue;
+
+    let albumId = albumIdByNormalizedTitle.get(normalizedAlbumTitle);
+
+    if (!albumId) {
+      const mediaInsert = await db.insert(media).values({
+        type: 'music',
+        title: inferred.title,
+      }).returning({ id: media.id });
+      const albumMediaId = mediaInsert[0]?.id;
+      if (!albumMediaId) continue;
+
+      const releaseDate = typeof inferred.releaseYear === 'number'
+        ? `${String(inferred.releaseYear)}-01-01`
+        : undefined;
+
+      const albumInsert = await db.insert(albums).values({
+        artistId: artistRecordId,
+        mediaId: albumMediaId,
+        releaseDate,
+        status: 'downloaded',
+        path: directoryPath,
+      }).returning({ id: albums.id });
+
+      albumId = albumInsert[0]?.id;
+      if (!albumId) continue;
+      albumIdByNormalizedTitle.set(normalizedAlbumTitle, albumId);
+      tracksByAlbumId.set(albumId, []);
+      createdAlbums += 1;
+    } else {
+      await db.update(albums)
+        .set({
+          status: 'downloaded',
+          path: directoryPath,
+        })
+        .where(eq(albums.id, albumId))
+        .run();
+    }
+
+    const existingAlbumTracks = tracksByAlbumId.get(albumId) || [];
+    for (const file of albumFiles) {
+      const matchedTrack = findExistingTrackForScannedFile(file, existingAlbumTracks);
+      if (matchedTrack) {
+        const hasDownloadedFlag = isEpisodeDownloadedValue(matchedTrack.downloaded);
+        const hasMatchingPath = typeof matchedTrack.filePath === 'string' && matchedTrack.filePath.trim() === file.fullPath;
+        if (!hasDownloadedFlag || !hasMatchingPath) {
+          await db.update(tracks)
+            .set({
+              downloaded: true,
+              filePath: file.fullPath,
+            })
+            .where(eq(tracks.id, matchedTrack.trackId))
+            .run();
+          matchedTrack.downloaded = true;
+          matchedTrack.filePath = file.fullPath;
+          updatedTracks += 1;
+        }
+        continue;
+      }
+
+      const inferredTrackTitle = parseTrackTitleFromFileName(file.fileName);
+      const trackMediaInsert = await db.insert(media).values({
+        type: 'music',
+        title: inferredTrackTitle,
+      }).returning({ id: media.id });
+      const trackMediaId = trackMediaInsert[0]?.id;
+      if (!trackMediaId) continue;
+
+      const trackInsert = await db.insert(tracks).values({
+        albumId,
+        mediaId: trackMediaId,
+        trackNumber: parseLeadingTrackNumber(file.fileName) ?? undefined,
+        downloaded: true,
+        filePath: file.fullPath,
+      }).returning({ id: tracks.id });
+
+      const trackId = trackInsert[0]?.id;
+      if (!trackId) continue;
+
+      const createdTrack: ExistingTrackForSync = {
+        trackId,
+        mediaId: trackMediaId,
+        trackNumber: parseLeadingTrackNumber(file.fileName),
+        title: inferredTrackTitle,
+        downloaded: true,
+        filePath: file.fullPath,
+      };
+      existingAlbumTracks.push(createdTrack);
+      tracksByAlbumId.set(albumId, existingAlbumTracks);
+      createdTracks += 1;
+    }
+  }
+
+  await db.update(artists)
+    .set({
+      status: 'downloaded',
+      path: artistRootPath,
+    })
+    .where(eq(artists.id, artistRecordId))
+    .run();
+
+  return { createdAlbums, createdTracks, updatedTracks };
 }
 
 async function syncMusicFromFilesystem(): Promise<{ updatedArtists: number; updatedAlbums: number; updatedTracks: number }> {
@@ -1894,7 +2153,13 @@ async function findPlayableFileInDirectory(
 
   const exactHintMatch = directFiles.find((candidatePath) => (
     normalizedTitleHint.length > 0
-      && normalizeTitleForMatch(path.basename(candidatePath)).includes(normalizedTitleHint)
+      && (
+        normalizeTitleForMatch(path.basename(candidatePath)).includes(normalizedTitleHint)
+        || normalizedContainsAllTokens(
+          normalizeTitleForMatch(path.basename(candidatePath)),
+          normalizedTitleHint,
+        )
+      )
   ));
   if (exactHintMatch) return exactHintMatch;
 
@@ -1916,6 +2181,7 @@ async function resolveMoviePlaybackFile(mediaId: number): Promise<string | null>
     .select({
       title: media.title,
       storedPath: movies.path,
+      releaseDate: movies.releaseDate,
     })
     .from(movies)
     .innerJoin(media, eq(movies.mediaId, media.id))
@@ -1952,9 +2218,8 @@ async function resolveMoviePlaybackFile(mediaId: number): Promise<string | null>
   if (scannedFiles.length === 0) return null;
 
   const normalizedTitle = normalizeTitleForMatch(titleHint);
-  const matched = scannedFiles.find((candidate) => (
-    normalizedTitle.length > 0 && candidate.normalizedCandidate.includes(normalizedTitle)
-  ));
+  const releaseYear = deriveYear(movieRow.releaseDate || null);
+  const matched = findBestTitleMatch(scannedFiles, normalizedTitle, releaseYear);
 
   return matched?.fullPath || null;
 }
@@ -2105,6 +2370,10 @@ const addArtistSchema = z.object({
   qualityProfileId: z.number().int().positive().optional(),
 });
 
+const locatePathSchema = z.object({
+  path: z.string().trim().min(1),
+});
+
 const playbackProgressUpdateSchema = z.object({
   mediaKind: z.enum(['movie', 'episode', 'track']),
   mediaId: z.number().int().positive(),
@@ -2213,6 +2482,33 @@ mediaRoutes.post('/movies', async (c) => {
   });
 
   return c.json({ id: mediaId, message: 'Movie added' }, 201);
+});
+
+// Manually locate movie on disk
+mediaRoutes.post('/movies/:id/locate', async (c) => {
+  const id = parseIdParam(c.req.param('id'));
+  if (id === null) return c.json({ error: 'Invalid movie id' }, 400);
+
+  const body = await c.req.json();
+  const data = locatePathSchema.parse(body);
+  const resolvedPath = resolveConfiguredPath(data.path.trim());
+
+  const hasFile = await isExistingFile(resolvedPath);
+  const hasDirectory = hasFile ? false : await isExistingDirectory(resolvedPath);
+  if (!hasFile && !hasDirectory) {
+    return c.json({ error: 'Path does not exist or is not accessible' }, 400);
+  }
+
+  const updateCount = await db.update(movies)
+    .set({
+      status: 'downloaded',
+      path: resolvedPath,
+    })
+    .where(eq(movies.mediaId, id))
+    .run();
+
+  if (!updateCount.changes) return c.json({ error: 'Movie not found' }, 404);
+  return c.json({ message: 'Movie path linked' });
 });
 
 // Get all TV series
@@ -2377,6 +2673,50 @@ mediaRoutes.post('/tv', async (c) => {
   return c.json({ id: created.mediaId, message: 'Series added' }, 201);
 });
 
+// Manually locate series on disk
+mediaRoutes.post('/tv/:id/locate', async (c) => {
+  const id = parseIdParam(c.req.param('id'));
+  if (id === null) return c.json({ error: 'Invalid series id' }, 400);
+
+  const body = await c.req.json();
+  const data = locatePathSchema.parse(body);
+  const resolvedPath = resolveConfiguredPath(data.path.trim());
+
+  const hasFile = await isExistingFile(resolvedPath);
+  const hasDirectory = hasFile ? false : await isExistingDirectory(resolvedPath);
+  if (!hasFile && !hasDirectory) {
+    return c.json({ error: 'Path does not exist or is not accessible' }, 400);
+  }
+
+  const seriesResult = await db
+    .select({
+      seriesRecordId: series.id,
+      title: media.title,
+    })
+    .from(series)
+    .innerJoin(media, eq(series.mediaId, media.id))
+    .where(eq(media.id, id))
+    .limit(1);
+
+  if (!seriesResult[0]) return c.json({ error: 'Series not found' }, 404);
+
+  const seriesRecordId = seriesResult[0].seriesRecordId;
+  const seriesTitle = seriesResult[0].title;
+  const directoryPath = hasFile ? path.dirname(resolvedPath) : resolvedPath;
+
+  await db.update(series)
+    .set({ path: directoryPath })
+    .where(eq(series.id, seriesRecordId))
+    .run();
+
+  const syncResult = await syncSeriesEpisodesFromFilesystem(seriesRecordId, seriesTitle, directoryPath);
+
+  return c.json({
+    message: 'Series path linked',
+    updatedEpisodes: syncResult.updatedCount,
+  });
+});
+
 // Get all artists
 mediaRoutes.get('/music/artists', async (c) => {
   try {
@@ -2433,6 +2773,41 @@ mediaRoutes.post('/music/artists', async (c) => {
   });
 
   return c.json({ id: mediaId, message: 'Artist added' }, 201);
+});
+
+// Manually locate artist library on disk
+mediaRoutes.post('/music/artists/:id/locate', async (c) => {
+  const id = parseIdParam(c.req.param('id'));
+  if (id === null) return c.json({ error: 'Invalid artist id' }, 400);
+
+  const body = await c.req.json();
+  const data = locatePathSchema.parse(body);
+  const resolvedPath = resolveConfiguredPath(data.path.trim());
+  const hasDirectory = await isExistingDirectory(resolvedPath);
+  if (!hasDirectory) {
+    return c.json({ error: 'Folder does not exist or is not accessible' }, 400);
+  }
+
+  const artistResult = await db
+    .select({
+      artistRecordId: artists.id,
+      title: media.title,
+    })
+    .from(artists)
+    .innerJoin(media, eq(artists.mediaId, media.id))
+    .where(eq(media.id, id))
+    .limit(1);
+
+  if (!artistResult[0]) return c.json({ error: 'Artist not found' }, 404);
+
+  const syncResult = await syncArtistFromFilesystem(artistResult[0].artistRecordId, resolvedPath);
+
+  return c.json({
+    message: 'Artist folder linked',
+    createdAlbums: syncResult.createdAlbums,
+    createdTracks: syncResult.createdTracks,
+    updatedTracks: syncResult.updatedTracks,
+  });
 });
 
 // Get artist with albums

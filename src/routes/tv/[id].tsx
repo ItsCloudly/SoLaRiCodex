@@ -1,6 +1,6 @@
 import { createAsync, useNavigate, useParams } from '@solidjs/router';
 import { createEffect, createMemo, createSignal } from 'solid-js';
-import { Calendar, Hash, Play, Tv } from 'lucide-solid';
+import { Calendar, Hash, Play, Tv, FolderOpen, Plus } from 'lucide-solid';
 import MainLayout from '~/components/layout/MainLayout';
 import { useMediaPlayer } from '~/components/player/MediaPlayerProvider';
 import { Badge, Button, Card, CardHeader, CardTitle, Input } from '~/components/ui';
@@ -162,6 +162,12 @@ export default function TvDetailsPage() {
 
   const series = () => seriesResult()?.data;
   const loadError = () => seriesResult()?.error;
+  const [initializedSeriesId, setInitializedSeriesId] = createSignal<number | null>(null);
+  const [seriesOverride, setSeriesOverride] = createSignal<Partial<TvSeriesDetails>>({});
+  const seriesData = () => {
+    const base = series();
+    return base ? { ...base, ...seriesOverride() } : undefined;
+  };
 
   const groupedSeasons = createMemo<SeasonGroup[]>(() => {
     const currentSeries = series();
@@ -196,7 +202,6 @@ export default function TvDetailsPage() {
     groupedSeasons().reduce((count, seasonGroup) => count + seasonGroup.downloadedCount, 0)
   ));
 
-  const [initializedSeriesId, setInitializedSeriesId] = createSignal<number | null>(null);
   const [releaseQuery, setReleaseQuery] = createSignal('');
   const [selectedSeasonNumber, setSelectedSeasonNumber] = createSignal('');
   const [expandedSeasonNumber, setExpandedSeasonNumber] = createSignal<number | null>(null);
@@ -215,6 +220,11 @@ export default function TvDetailsPage() {
   const [jackettMessage, setJackettMessage] = createSignal<string | null>(null);
   const [jackettError, setJackettError] = createSignal<string | null>(null);
   const [playbackError, setPlaybackError] = createSignal<string | null>(null);
+  const [manualPath, setManualPath] = createSignal('');
+  const [locatingPath, setLocatingPath] = createSignal(false);
+  const [locateMessage, setLocateMessage] = createSignal<string | null>(null);
+  const [locateError, setLocateError] = createSignal<string | null>(null);
+  const [showLocalPanel, setShowLocalPanel] = createSignal(false);
 
   createEffect(() => {
     const currentSeries = series();
@@ -224,6 +234,7 @@ export default function TvDetailsPage() {
     const firstSeason = groupedSeasons()[0]?.season;
 
     setInitializedSeriesId(currentSeries.id);
+    setSeriesOverride({});
     setReleaseQuery(currentSeries.title);
     setSelectedSeasonNumber(typeof firstSeason === 'number' ? String(firstSeason) : '');
     setExpandedSeasonNumber(null);
@@ -233,6 +244,10 @@ export default function TvDetailsPage() {
     setJackettMessage(null);
     setJackettError(null);
     setPlaybackError(null);
+    setManualPath(currentSeries.path || '');
+    setLocateMessage(null);
+    setLocateError(null);
+    setShowLocalPanel(false);
   });
 
   createEffect(() => {
@@ -495,6 +510,41 @@ export default function TvDetailsPage() {
     setSendingToDelugeId(null);
   };
 
+  const handleLocatePath = async () => {
+    const currentSeries = seriesData();
+    if (!currentSeries) return;
+
+    const pathValue = manualPath().trim();
+    if (!pathValue) {
+      setLocateError('Enter a folder path before linking.');
+      return;
+    }
+
+    setLocatingPath(true);
+    setLocateError(null);
+    setLocateMessage(null);
+
+    const response = await requestJson<{ message: string; updatedEpisodes?: number }>(`/api/media/tv/${currentSeries.id}/locate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: pathValue }),
+    });
+
+    if (response.error) {
+      setLocateError(response.error);
+      setLocatingPath(false);
+      return;
+    }
+
+    const updatedEpisodes = response.data?.updatedEpisodes;
+    const message = response.data?.message || 'Series path linked.';
+    setLocateMessage(typeof updatedEpisodes === 'number'
+      ? `${message} Updated ${updatedEpisodes} episode${updatedEpisodes === 1 ? '' : 's'}.`
+      : message);
+    setSeriesOverride({ path: pathValue });
+    setLocatingPath(false);
+  };
+
   return (
     <MainLayout>
       <div class="movie-details-page">
@@ -511,13 +561,13 @@ export default function TvDetailsPage() {
           </Card>
         )}
 
-        {series() && (
+        {seriesData() && (
           <>
             <Card class="movie-details-card">
               <div class="movie-details-layout">
                 <div class="movie-details-poster">
-                  {series()?.posterPath ? (
-                    <img src={series()?.posterPath || ''} alt={series()?.title || 'TV show poster'} />
+                  {seriesData()?.posterPath ? (
+                    <img src={seriesData()?.posterPath || ''} alt={seriesData()?.title || 'TV show poster'} />
                   ) : (
                     <div class="poster-placeholder">
                       <Tv size={64} />
@@ -527,28 +577,30 @@ export default function TvDetailsPage() {
 
                 <div class="movie-details-content">
                   <div class="movie-details-title-row">
-                    <h2 class="movie-details-title">{series()?.title}</h2>
-                    <Badge variant={resolveStatusVariant(series()?.status || 'wanted')}>
-                      {series()?.status}
-                    </Badge>
+                    <h2 class="movie-details-title">{seriesData()?.title}</h2>
+                    <div class="movie-details-title-actions">
+                      <Badge variant={resolveStatusVariant(seriesData()?.status || 'wanted')}>
+                        {seriesData()?.status}
+                      </Badge>
+                    </div>
                   </div>
 
-                  {series()?.originalTitle && series()?.originalTitle !== series()?.title && (
-                    <p class="movie-details-original-title">Original title: {series()?.originalTitle}</p>
+                  {seriesData()?.originalTitle && seriesData()?.originalTitle !== seriesData()?.title && (
+                    <p class="movie-details-original-title">Original title: {seriesData()?.originalTitle}</p>
                   )}
 
                   <p class="movie-details-overview">
-                    {series()?.overview || 'No overview is available for this TV show yet.'}
+                    {seriesData()?.overview || 'No overview is available for this TV show yet.'}
                   </p>
 
                   <div class="movie-details-meta">
                     <span class="meta-item">
                       <Calendar size={14} />
-                      Year: {formatReleaseYear(series()?.releaseDate)}
+                      Year: {formatReleaseYear(seriesData()?.releaseDate)}
                     </span>
                     <span class="meta-item">
                       <Hash size={14} />
-                      TVDB: {series()?.tvdbId ?? 'n/a'}
+                      TVDB: {seriesData()?.tvdbId ?? 'n/a'}
                     </span>
                     <span class="meta-item">
                       <Tv size={14} />
@@ -556,7 +608,7 @@ export default function TvDetailsPage() {
                     </span>
                     <span class="meta-item">
                       <Hash size={14} />
-                      Episodes: {series()?.episodes.length ?? 0}
+                      Episodes: {seriesData()?.episodes.length ?? 0}
                     </span>
                     <span class="meta-item">
                       <Hash size={14} />
@@ -566,6 +618,39 @@ export default function TvDetailsPage() {
                 </div>
               </div>
             </Card>
+
+            {showLocalPanel() && (
+              <Card class="local-media-card">
+                <CardHeader>
+                  <CardTitle>Local Series Folder</CardTitle>
+                </CardHeader>
+
+                <div class="local-media-form">
+                  <div class="form-group">
+                    <label>Folder Path</label>
+                    <Input
+                      value={manualPath()}
+                      onInput={setManualPath}
+                      placeholder="e.g. D:\\Media\\TV\\The Expanse"
+                    />
+                  </div>
+
+                  <div class="local-media-actions">
+                    <Button
+                      variant="secondary"
+                      onClick={handleLocatePath}
+                      disabled={locatingPath()}
+                    >
+                      <FolderOpen size={14} />
+                      {locatingPath() ? 'Linking...' : 'Link Local Folder'}
+                    </Button>
+                  </div>
+
+                  {locateError() && <p class="inline-feedback error">{locateError()}</p>}
+                  {locateMessage() && <p class="inline-feedback success">{locateMessage()}</p>}
+                </div>
+              </Card>
+            )}
 
             <Card class="tv-seasons-card">
               <CardHeader>
@@ -600,6 +685,13 @@ export default function TvDetailsPage() {
                           >
                             <Play size={14} />
                             Play Season
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowLocalPanel(true)}
+                          >
+                            <Plus size={14} />
                           </Button>
                           <Button
                             variant="secondary"

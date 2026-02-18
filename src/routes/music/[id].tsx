@@ -1,6 +1,6 @@
 import { createAsync, useNavigate, useParams } from '@solidjs/router';
 import { createEffect, createSignal } from 'solid-js';
-import { Calendar, Disc, Hash, Music, Play } from 'lucide-solid';
+import { Calendar, Disc, Hash, Music, Play, FolderOpen, Plus } from 'lucide-solid';
 import MainLayout from '~/components/layout/MainLayout';
 import { useMediaPlayer } from '~/components/player/MediaPlayerProvider';
 import { Badge, Button, Card, CardHeader, CardTitle, Input } from '~/components/ui';
@@ -213,8 +213,13 @@ export default function ArtistDetailsPage() {
 
   const artist = () => artistResult()?.data;
   const loadError = () => artistResult()?.error;
-
   const [initializedArtistId, setInitializedArtistId] = createSignal<number | null>(null);
+  const [artistOverride, setArtistOverride] = createSignal<Partial<ArtistDetails>>({});
+  const artistData = () => {
+    const base = artist();
+    return base ? { ...base, ...artistOverride() } : undefined;
+  };
+
   const [loadingFilters, setLoadingFilters] = createSignal(false);
   const [loadingReleaseGroups, setLoadingReleaseGroups] = createSignal(false);
   const [searchingReleases, setSearchingReleases] = createSignal(false);
@@ -240,6 +245,11 @@ export default function ArtistDetailsPage() {
   const [libraryLoadingAlbumId, setLibraryLoadingAlbumId] = createSignal<number | null>(null);
   const [expandedLibraryAlbumId, setExpandedLibraryAlbumId] = createSignal<number | null>(null);
   const [albumTracksById, setAlbumTracksById] = createSignal<Record<number, AlbumTrack[]>>({});
+  const [manualPath, setManualPath] = createSignal('');
+  const [locatingPath, setLocatingPath] = createSignal(false);
+  const [locateMessage, setLocateMessage] = createSignal<string | null>(null);
+  const [locateError, setLocateError] = createSignal<string | null>(null);
+  const [showLocalPanel, setShowLocalPanel] = createSignal(false);
   const groupedReleaseGroups = () => groupReleaseGroupsByCategory(releaseGroups());
 
   createEffect(() => {
@@ -248,6 +258,7 @@ export default function ArtistDetailsPage() {
     if (initializedArtistId() === currentArtist.id) return;
 
     setInitializedArtistId(currentArtist.id);
+    setArtistOverride({});
     setReleaseQuery(currentArtist.title);
     setJackettMessage(null);
     setJackettError(null);
@@ -262,6 +273,10 @@ export default function ArtistDetailsPage() {
     setLibraryLoadingAlbumId(null);
     setExpandedLibraryAlbumId(null);
     setAlbumTracksById({});
+    setManualPath(currentArtist.path || '');
+    setLocateMessage(null);
+    setLocateError(null);
+    setShowLocalPanel(false);
 
     void loadIndexerFilters();
     void loadArtistReleaseGroups(currentArtist.musicBrainzId, currentArtist.title);
@@ -625,6 +640,44 @@ export default function ArtistDetailsPage() {
     setSendingToDelugeId(null);
   };
 
+  const handleLocatePath = async () => {
+    const currentArtist = artistData();
+    if (!currentArtist) return;
+
+    const pathValue = manualPath().trim();
+    if (!pathValue) {
+      setLocateError('Enter a folder path before linking.');
+      return;
+    }
+
+    setLocatingPath(true);
+    setLocateError(null);
+    setLocateMessage(null);
+
+    const response = await requestJson<{ message: string; createdAlbums?: number; createdTracks?: number; updatedTracks?: number }>(
+      `/api/media/music/artists/${currentArtist.id}/locate`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: pathValue }),
+      },
+    );
+
+    if (response.error) {
+      setLocateError(response.error);
+      setLocatingPath(false);
+      return;
+    }
+
+    const createdAlbums = response.data?.createdAlbums ?? 0;
+    const createdTracks = response.data?.createdTracks ?? 0;
+    const updatedTracks = response.data?.updatedTracks ?? 0;
+    const summary = `Albums: +${createdAlbums}, Tracks: +${createdTracks}, Updated: ${updatedTracks}`;
+    setLocateMessage(`${response.data?.message || 'Artist folder linked.'} ${summary}`);
+    setArtistOverride({ path: pathValue, status: 'downloaded' });
+    setLocatingPath(false);
+  };
+
   return (
     <MainLayout>
       <div class="movie-details-page">
@@ -641,13 +694,13 @@ export default function ArtistDetailsPage() {
           </Card>
         )}
 
-        {artist() && (
+        {artistData() && (
           <>
             <Card class="movie-details-card">
               <div class="movie-details-layout">
                 <div class="movie-details-poster">
-                  {artist()?.posterPath ? (
-                    <img src={artist()?.posterPath || ''} alt={artist()?.title || 'Artist artwork'} />
+                  {artistData()?.posterPath ? (
+                    <img src={artistData()?.posterPath || ''} alt={artistData()?.title || 'Artist artwork'} />
                   ) : (
                     <div class="poster-placeholder">
                       <Music size={64} />
@@ -657,28 +710,28 @@ export default function ArtistDetailsPage() {
 
                 <div class="movie-details-content">
                   <div class="movie-details-title-row">
-                    <h2 class="movie-details-title">{artist()?.title}</h2>
-                    <Badge variant={artist()?.status === 'downloaded' ? 'success' : 'warning'}>
-                      {artist()?.status}
+                    <h2 class="movie-details-title">{artistData()?.title}</h2>
+                    <Badge variant={artistData()?.status === 'downloaded' ? 'success' : 'warning'}>
+                      {artistData()?.status}
                     </Badge>
                   </div>
 
                   <p class="movie-details-overview">
-                    {artist()?.overview || 'No artist overview is available yet.'}
+                    {artistData()?.overview || 'No artist overview is available yet.'}
                   </p>
 
                   <div class="movie-details-meta">
                     <span class="meta-item">
                       <Disc size={14} />
-                      Records in library: {artist()?.albums.length ?? 0}
+                      Records in library: {artistData()?.albums.length ?? 0}
                     </span>
                     <span class="meta-item">
                       <Calendar size={14} />
-                      Genre: {artist()?.genre || 'n/a'}
+                      Genre: {artistData()?.genre || 'n/a'}
                     </span>
                     <span class="meta-item">
                       <Hash size={14} />
-                      MBID: {artist()?.musicBrainzId || 'n/a'}
+                      MBID: {artistData()?.musicBrainzId || 'n/a'}
                     </span>
                   </div>
                 </div>
@@ -690,13 +743,40 @@ export default function ArtistDetailsPage() {
                 <CardTitle>Library Albums</CardTitle>
               </CardHeader>
 
+              {showLocalPanel() && (
+                <div class="local-media-form">
+                  <div class="form-group">
+                    <label>Artist Folder</label>
+                    <Input
+                      value={manualPath()}
+                      onInput={setManualPath}
+                      placeholder="e.g. D:\\Media\\Music\\Daft Punk"
+                    />
+                  </div>
+
+                  <div class="local-media-actions">
+                    <Button
+                      variant="secondary"
+                      onClick={handleLocatePath}
+                      disabled={locatingPath()}
+                    >
+                      <FolderOpen size={14} />
+                      {locatingPath() ? 'Linking...' : 'Link Local Folder'}
+                    </Button>
+                  </div>
+
+                  {locateError() && <p class="inline-feedback error">{locateError()}</p>}
+                  {locateMessage() && <p class="inline-feedback success">{locateMessage()}</p>}
+                </div>
+              )}
+
               {libraryError() && <p class="inline-feedback error">{libraryError()}</p>}
 
-              {artist()?.albums.length === 0 ? (
+              {artistData()?.albums.length === 0 ? (
                 <p class="jackett-empty">No albums are stored under this artist yet.</p>
               ) : (
                 <div class="music-library-albums">
-                  {artist()?.albums.map((album) => (
+                  {artistData()?.albums.map((album) => (
                     <Card class="music-library-album-card" key={`album-${album.id}`}>
                       <div class="music-library-album-header">
                         <div class="music-library-album-meta">
@@ -707,6 +787,13 @@ export default function ArtistDetailsPage() {
                           <Badge variant={album.status === 'downloaded' ? 'success' : 'warning'}>
                             {album.status}
                           </Badge>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowLocalPanel(true)}
+                          >
+                            <Plus size={12} />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"

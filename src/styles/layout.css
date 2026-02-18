@@ -809,6 +809,23 @@ html[data-theme='dark'] .theme-toggle-icon-moon {
   font-size: 0.75rem;
 }
 
+
+.local-media-card {
+  margin-top: 0.9rem;
+}
+
+.local-media-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.local-media-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .tv-season-title {
   font-size: 1rem;
 }
