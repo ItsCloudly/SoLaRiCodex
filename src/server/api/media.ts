@@ -7,7 +7,7 @@ import { PassThrough, Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { db } from '../db/connection';
-import { albums, artists, downloads, episodes, media, movies, series, settings, tracks } from '../db/schema';
+import { albums, artists, downloads, episodes, media, movies, series, settings, tracks, trackLyrics } from '../db/schema';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { parseIdParam } from './utils';
 
@@ -99,6 +99,7 @@ const ALBUM_ARTWORK_PRIORITY_NAMES = [
 const PLAYBACK_PROGRESS_SETTING_KEY = 'player.playback.progress.v1';
 const PLAYBACK_PROGRESS_MAX_ITEMS = 800;
 const MKV_COMPAT_STREAM_START_TIMEOUT_MS = 15_000;
+const LRCLIB_BASE_URL = 'https://lrclib.net/api/get';
 const seriesFilesystemSyncCache = new Map<number, number>();
 let lastMoviesFilesystemSyncAt = 0;
 let lastMusicFilesystemSyncAt = 0;
@@ -136,8 +137,56 @@ interface DurationCacheEntry {
   expiresAt: number;
 }
 
+interface LrcFetchResult {
+  syncedLrc: string | null;
+  plainLyrics: string | null;
+  sourceId: string | null;
+}
+
 const mediaDurationCache = new Map<string, DurationCacheEntry>();
 const MEDIA_DURATION_CACHE_TTL_MS = 1000 * 60 * 30;
+
+async function fetchSyncedLyricsFromLrclib(params: {
+  trackTitle: string | null;
+  artistName: string | null;
+  albumTitle: string | null;
+  durationSeconds?: number | null;
+}): Promise<LrcFetchResult | null> {
+  const trackTitle = params.trackTitle?.trim();
+  const artistName = params.artistName?.trim();
+  const albumTitle = params.albumTitle?.trim();
+
+  if (!trackTitle || !artistName) return null;
+
+  const url = new URL(LRCLIB_BASE_URL);
+  url.searchParams.set('track_name', trackTitle);
+  url.searchParams.set('artist_name', artistName);
+  if (albumTitle) {
+    url.searchParams.set('album_name', albumTitle);
+  }
+  if (typeof params.durationSeconds === 'number' && Number.isFinite(params.durationSeconds) && params.durationSeconds > 0) {
+    url.searchParams.set('duration', String(Math.round(params.durationSeconds)));
+  }
+
+  const response = await fetch(url, { signal: AbortSignal.timeout(12000) });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`Lyrics provider failed (${response.status})`);
+  }
+
+  const payload = await response.json();
+  if (!payload || typeof payload !== 'object') return null;
+
+  const syncedLyrics = typeof payload.syncedLyrics === 'string' ? payload.syncedLyrics.trim() : '';
+  const plainLyrics = typeof payload.plainLyrics === 'string' ? payload.plainLyrics.trim() : '';
+  const sourceId = payload.id ? String(payload.id) : null;
+
+  return {
+    syncedLrc: syncedLyrics.length > 0 ? syncedLyrics : null,
+    plainLyrics: plainLyrics.length > 0 ? plainLyrics : null,
+    sourceId,
+  };
+}
 
 async function getSettingValue(key: string): Promise<string | null> {
   const result = await db
@@ -2911,6 +2960,136 @@ mediaRoutes.get('/music/albums/:id', async (c) => {
     ...albumPayload,
     tracks: tracksResult,
   });
+});
+
+// Get synced lyrics for a track
+mediaRoutes.get('/music/tracks/:id/lyrics', async (c) => {
+  const id = parseIdParam(c.req.param('id'));
+  if (id === null) return c.json({ error: 'Invalid track id' }, 400);
+
+  const cachedLyrics = await db
+    .select({
+      provider: trackLyrics.provider,
+      sourceId: trackLyrics.sourceId,
+      syncedLrc: trackLyrics.syncedLrc,
+      plainLyrics: trackLyrics.plainLyrics,
+      updatedAt: trackLyrics.updatedAt,
+    })
+    .from(trackLyrics)
+    .where(eq(trackLyrics.trackId, id))
+    .limit(1);
+
+  if (cachedLyrics[0]) {
+    return c.json({
+      status: 'ok',
+      source: 'cache',
+      lyrics: cachedLyrics[0],
+    });
+  }
+
+  const trackRow = await db
+    .select({
+      trackId: tracks.id,
+      title: media.title,
+      duration: tracks.duration,
+      albumId: tracks.albumId,
+    })
+    .from(tracks)
+    .innerJoin(media, eq(tracks.mediaId, media.id))
+    .where(eq(tracks.id, id))
+    .limit(1);
+
+  if (!trackRow[0]) return c.json({ error: 'Track not found' }, 404);
+
+  const albumRow = await db
+    .select({
+      title: media.title,
+      artistId: albums.artistId,
+    })
+    .from(albums)
+    .innerJoin(media, eq(albums.mediaId, media.id))
+    .where(eq(albums.id, trackRow[0].albumId))
+    .limit(1);
+
+  const artistRow = albumRow[0]
+    ? await db
+      .select({ title: media.title })
+      .from(artists)
+      .innerJoin(media, eq(artists.mediaId, media.id))
+      .where(eq(artists.id, albumRow[0].artistId))
+      .limit(1)
+    : [];
+
+  try {
+    const fetched = await fetchSyncedLyricsFromLrclib({
+      trackTitle: trackRow[0].title,
+      artistName: artistRow[0]?.title ?? null,
+      albumTitle: albumRow[0]?.title ?? null,
+      durationSeconds: trackRow[0].duration ?? null,
+    });
+
+    if (!fetched || (!fetched.syncedLrc && !fetched.plainLyrics)) {
+      await db
+        .insert(trackLyrics)
+        .values({
+          trackId: id,
+          provider: 'lrclib',
+          syncedLrc: null,
+          plainLyrics: null,
+          sourceId: fetched?.sourceId ?? null,
+        })
+        .onConflictDoUpdate({
+          target: trackLyrics.trackId,
+          set: {
+            provider: 'lrclib',
+            syncedLrc: null,
+            plainLyrics: null,
+            sourceId: fetched?.sourceId ?? null,
+            updatedAt: sql`CURRENT_TIMESTAMP`,
+          },
+        });
+
+      return c.json({
+        status: 'ok',
+        source: 'miss',
+        lyrics: null,
+      });
+    }
+
+    await db
+      .insert(trackLyrics)
+      .values({
+        trackId: id,
+        provider: 'lrclib',
+        syncedLrc: fetched.syncedLrc,
+        plainLyrics: fetched.plainLyrics,
+        sourceId: fetched.sourceId,
+      })
+      .onConflictDoUpdate({
+        target: trackLyrics.trackId,
+        set: {
+          provider: 'lrclib',
+          syncedLrc: fetched.syncedLrc,
+          plainLyrics: fetched.plainLyrics,
+          sourceId: fetched.sourceId,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        },
+      });
+
+    return c.json({
+      status: 'ok',
+      source: 'remote',
+      lyrics: {
+        provider: 'lrclib',
+        sourceId: fetched.sourceId,
+        syncedLrc: fetched.syncedLrc,
+        plainLyrics: fetched.plainLyrics,
+        updatedAt: Date.now(),
+      },
+    });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Lyrics provider failed' }, 502);
+  }
 });
 
 // Get locally playable media options for player queue additions

@@ -44,6 +44,20 @@ interface PlaybackLibraryResponse {
   items: PlayerQueueItem[];
 }
 
+interface TrackLyricsPayload {
+  provider: string;
+  sourceId: string | null;
+  syncedLrc: string | null;
+  plainLyrics: string | null;
+  updatedAt: number;
+}
+
+interface TrackLyricsResponse {
+  status: 'ok';
+  source: 'cache' | 'remote' | 'miss';
+  lyrics: TrackLyricsPayload | null;
+}
+
 interface MediaPlayerContextValue {
   isOpen: Accessor<boolean>;
   queue: Accessor<PlayerQueueItem[]>;
@@ -84,6 +98,38 @@ function formatDuration(seconds: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
 }
 
+function parseLrc(lyrics: string): Array<{ timeMs: number; text: string }> {
+  const lines = lyrics.split(/\r?\n/);
+  const entries: Array<{ timeMs: number; text: string }> = [];
+  const timestampRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
+
+  for (const line of lines) {
+    timestampRegex.lastIndex = 0;
+    const timestamps: number[] = [];
+    let match = timestampRegex.exec(line);
+    while (match) {
+      const minutes = Number.parseInt(match[1], 10);
+      const seconds = Number.parseInt(match[2], 10);
+      const millisRaw = match[3] ? match[3].padEnd(3, '0') : '0';
+      const millis = Number.parseInt(millisRaw, 10);
+      if (Number.isFinite(minutes) && Number.isFinite(seconds) && Number.isFinite(millis)) {
+        timestamps.push((minutes * 60 + seconds) * 1000 + millis);
+      }
+      match = timestampRegex.exec(line);
+    }
+
+    if (timestamps.length === 0) continue;
+    const text = line.replace(timestampRegex, '').trim();
+    if (!text) continue;
+
+    for (const timeMs of timestamps) {
+      entries.push({ timeMs, text });
+    }
+  }
+
+  return entries.sort((a, b) => a.timeMs - b.timeMs);
+}
+
 export function MediaPlayerPanel() {
   const player = useMediaPlayer();
 
@@ -114,12 +160,28 @@ export function MediaPlayerPanel() {
   const [showLibraryPicker, setShowLibraryPicker] = createSignal(false);
   const [draggingIndex, setDraggingIndex] = createSignal<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = createSignal<number | null>(null);
+  const [audioPanelMode, setAudioPanelMode] = createSignal<'playlist' | 'lyrics'>('playlist');
+  const [lyricsState, setLyricsState] = createSignal<{
+    trackId: number | null;
+    status: 'idle' | 'loading' | 'ready' | 'empty' | 'error';
+    syncedLrc: string | null;
+    plainLyrics: string | null;
+    error: string | null;
+  }>({
+    trackId: null,
+    status: 'idle',
+    syncedLrc: null,
+    plainLyrics: null,
+    error: null,
+  });
+  const [lastScrolledLyricIndex, setLastScrolledLyricIndex] = createSignal<number | null>(null);
 
   let videoRef: HTMLVideoElement | undefined;
   let audioRef: HTMLAudioElement | undefined;
   let panelRef: HTMLDivElement | undefined;
   let videoStageRef: HTMLDivElement | undefined;
   let controlsHideTimeout: ReturnType<typeof setTimeout> | undefined;
+  let lyricsListRef: HTMLDivElement | undefined;
 
   const getActiveElement = (): HTMLMediaElement | null => {
     const item = player.currentItem();
@@ -139,6 +201,10 @@ export function MediaPlayerPanel() {
   const playlistKindLabel = createMemo(() => (
     currentPlaylistKind() === 'episode' ? 'shows' : 'music'
   ));
+  const currentTrackId = createMemo(() => {
+    const item = player.currentItem();
+    return item?.mediaKind === 'track' ? item.mediaId : null;
+  });
   const showInlineControls = createMemo(() => !isVideoMode() || !isFullscreen());
   const filteredLibraryItems = createMemo(() => {
     const query = libraryQuery().trim().toLowerCase();
@@ -159,6 +225,19 @@ export function MediaPlayerPanel() {
     if (!Number.isFinite(duration) || duration <= 0) return 0;
     const position = isScrubbing() ? scrubSeconds() : currentSeconds();
     return clamp((position / duration) * 100, 0, 100);
+  });
+  const lyricsLines = createMemo(() => parseLrc(lyricsState().syncedLrc ?? ''));
+  const activeLyricIndex = createMemo(() => {
+    if (lyricsState().status !== 'ready') return -1;
+    const lines = lyricsLines();
+    if (lines.length === 0) return -1;
+    const currentMs = currentSeconds() * 1000;
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      if (currentMs >= lines[index].timeMs) {
+        return index;
+      }
+    }
+    return -1;
   });
 
   const syncElementVolume = () => {
@@ -205,6 +284,53 @@ export function MediaPlayerPanel() {
     const items = response.data.items || [];
     setLibraryItems(items);
     setIsLoadingLibrary(false);
+  };
+
+  const loadLyricsForTrack = async (trackId: number) => {
+    const current = lyricsState();
+    if (current.status === 'loading' && current.trackId === trackId) return;
+    setLyricsState({
+      trackId,
+      status: 'loading',
+      syncedLrc: null,
+      plainLyrics: null,
+      error: null,
+    });
+
+    const response = await requestJson<TrackLyricsResponse>(`/api/media/music/tracks/${trackId}/lyrics`);
+    if (response.error || !response.data) {
+      setLyricsState({
+        trackId,
+        status: 'error',
+        syncedLrc: null,
+        plainLyrics: null,
+        error: response.error || 'Failed to load lyrics',
+      });
+      return;
+    }
+
+    const payload = response.data.lyrics;
+    const syncedLrc = payload?.syncedLrc ?? null;
+    const plainLyrics = payload?.plainLyrics ?? null;
+
+    if (!syncedLrc && !plainLyrics) {
+      setLyricsState({
+        trackId,
+        status: 'empty',
+        syncedLrc: null,
+        plainLyrics: null,
+        error: null,
+      });
+      return;
+    }
+
+    setLyricsState({
+      trackId,
+      status: 'ready',
+      syncedLrc,
+      plainLyrics,
+      error: null,
+    });
   };
 
   const persistProgress = async (options?: { force?: boolean; completed?: boolean }) => {
@@ -709,12 +835,8 @@ export function MediaPlayerPanel() {
     </div>
   );
 
-  const renderPlaylistSection = (mode: 'default' | 'side' = 'default') => (
-    <section class={`media-player-playlist-block ${mode === 'side' ? 'side' : ''}`}>
-      <div class="media-player-playlist-head">
-        <h4>Current Playlist</h4>
-        <span>{player.queue().length} item{player.queue().length === 1 ? '' : 's'}</span>
-      </div>
+  const renderPlaylistList = () => (
+    <>
       <div class="media-player-playlist-list">
         {player.queue().map((item, index) => (
           <button
@@ -793,6 +915,88 @@ export function MediaPlayerPanel() {
       <Show when={playlistFeedback()}>
         <p class="media-player-playlist-feedback">{playlistFeedback()}</p>
       </Show>
+    </>
+  );
+
+  const renderLyricsPanel = () => (
+    <div class="media-player-lyrics-panel">
+      <Show
+        when={lyricsState().status === 'ready' && lyricsLines().length > 0}
+        fallback={(
+          <div class="media-player-lyrics-empty">
+            <Show when={lyricsState().status === 'loading'}>
+              <span>Loading synced lyrics...</span>
+            </Show>
+            <Show when={lyricsState().status === 'empty'}>
+              <span>No synced lyrics found.</span>
+            </Show>
+            <Show when={lyricsState().status === 'ready' && lyricsLines().length === 0}>
+              <span>No synced lyrics found.</span>
+            </Show>
+            <Show when={lyricsState().status === 'error'}>
+              <span>{lyricsState().error || 'Lyrics unavailable.'}</span>
+            </Show>
+            <Show when={lyricsState().status === 'idle'}>
+              <span>Tap Lyrics to load synced lines.</span>
+            </Show>
+          </div>
+        )}
+      >
+        <div class="media-player-lyrics-list" ref={lyricsListRef}>
+          {lyricsLines().map((line, index) => (
+            <div
+              class={`media-player-lyrics-line ${index === activeLyricIndex() ? 'active' : ''}`}
+              data-lyric-index={index}
+            >
+              {line.text}
+            </div>
+          ))}
+        </div>
+      </Show>
+    </div>
+  );
+
+  const renderAudioPanel = () => (
+    <section class="media-player-playlist-block side">
+      <div class="media-player-playlist-head">
+        <div class="media-player-playlist-title">
+          <h4>{audioPanelMode() === 'lyrics' ? 'Lyrics' : 'Current Playlist'}</h4>
+          <span>{player.queue().length} item{player.queue().length === 1 ? '' : 's'}</span>
+        </div>
+        <Show when={currentTrackId() !== null}>
+          <div class="media-player-panel-toggle" role="group" aria-label="Playlist or lyrics">
+            <button
+              type="button"
+              class={`media-player-panel-toggle-button ${audioPanelMode() === 'playlist' ? 'active' : ''}`}
+              aria-pressed={audioPanelMode() === 'playlist'}
+              onClick={() => setAudioPanelMode('playlist')}
+            >
+              Playlist
+            </button>
+            <button
+              type="button"
+              class={`media-player-panel-toggle-button ${audioPanelMode() === 'lyrics' ? 'active' : ''}`}
+              aria-pressed={audioPanelMode() === 'lyrics'}
+              onClick={() => setAudioPanelMode('lyrics')}
+            >
+              Lyrics
+            </button>
+          </div>
+        </Show>
+      </div>
+      <Show when={audioPanelMode() === 'lyrics'} fallback={renderPlaylistList()}>
+        {renderLyricsPanel()}
+      </Show>
+    </section>
+  );
+
+  const renderPlaylistSection = (mode: 'default' | 'side' = 'default') => (
+    <section class={`media-player-playlist-block ${mode === 'side' ? 'side' : ''}`}>
+      <div class="media-player-playlist-head">
+        <h4>Current Playlist</h4>
+        <span>{player.queue().length} item{player.queue().length === 1 ? '' : 's'}</span>
+      </div>
+      {renderPlaylistList()}
     </section>
   );
 
@@ -928,6 +1132,55 @@ export function MediaPlayerPanel() {
     void token;
   });
 
+  createEffect(() => {
+    const trackId = currentTrackId();
+    if (!trackId) {
+      setLyricsState({
+        trackId: null,
+        status: 'idle',
+        syncedLrc: null,
+        plainLyrics: null,
+        error: null,
+      });
+      setAudioPanelMode('playlist');
+      return;
+    }
+
+    if (lyricsState().trackId !== trackId) {
+      setLyricsState({
+        trackId,
+        status: 'idle',
+        syncedLrc: null,
+        plainLyrics: null,
+        error: null,
+      });
+      setLastScrolledLyricIndex(null);
+    }
+  });
+
+  createEffect(() => {
+    if (audioPanelMode() !== 'lyrics') return;
+    const trackId = currentTrackId();
+    if (!trackId) return;
+    if (lyricsState().trackId !== trackId || lyricsState().status === 'idle') {
+      void loadLyricsForTrack(trackId);
+    }
+  });
+
+  createEffect(() => {
+    if (audioPanelMode() !== 'lyrics') return;
+    const activeIndex = activeLyricIndex();
+    if (activeIndex < 0 || activeIndex === lastScrolledLyricIndex()) return;
+    const list = lyricsListRef;
+    if (!list) return;
+    const target = list.querySelector(`[data-lyric-index="${activeIndex}"]`) as HTMLElement | null;
+    if (!target) return;
+    setLastScrolledLyricIndex(activeIndex);
+    requestAnimationFrame(() => {
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  });
+
   return (
     <Show when={player.isOpen() && player.currentItem()}>
       <div
@@ -997,7 +1250,7 @@ export function MediaPlayerPanel() {
               </div>
               <Show when={showPlaylist()}>
                 <div class="media-player-playlist-card">
-                  {renderPlaylistSection('side')}
+                  {renderAudioPanel()}
                 </div>
               </Show>
             </div>

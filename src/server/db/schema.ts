@@ -87,6 +87,17 @@ export const tracks = sqliteTable('tracks', {
   filePath: text('file_path'),
 });
 
+// Track Lyrics
+export const trackLyrics = sqliteTable('track_lyrics', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  trackId: integer('track_id').references(() => tracks.id).notNull(),
+  provider: text('provider').notNull(),
+  sourceId: text('source_id'),
+  syncedLrc: text('synced_lrc'),
+  plainLyrics: text('plain_lyrics'),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`CURRENT_TIMESTAMP`),
+});
+
 // Quality Profiles
 export const qualityProfiles = sqliteTable('quality_profiles', {
   id: integer('id').primaryKey({ autoIncrement: true }),
