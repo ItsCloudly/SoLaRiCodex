@@ -8,6 +8,7 @@ import {
   onCleanup,
   onMount,
   Show,
+  untrack,
   useContext,
 } from 'solid-js';
 import { Disc3, Expand, GripVertical, Minimize2, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX, X } from 'lucide-solid';
@@ -58,6 +59,46 @@ interface TrackLyricsResponse {
   lyrics: TrackLyricsPayload | null;
 }
 
+interface TrackMetadataResponse {
+  trackId: number;
+  title: string;
+  artist: string | null;
+  album: string | null;
+}
+
+interface VideoAudioTrackOption {
+  id: string;
+  source: 'embedded';
+  streamIndex: number;
+  language: string | null;
+  title: string | null;
+  codec: string | null;
+  channels: number | null;
+  default: boolean;
+  label: string;
+}
+
+interface VideoSubtitleTrackOption {
+  id: string;
+  source: 'embedded' | 'external' | 'online';
+  streamIndex: number | null;
+  fileName: string | null;
+  onlineToken?: string | null;
+  language: string | null;
+  title: string | null;
+  codec: string | null;
+  default: boolean;
+  label: string;
+}
+
+interface VideoOptionsResponse {
+  kind: 'movie' | 'episode';
+  id: number;
+  hasCompatibilityStream: boolean;
+  audioTracks: VideoAudioTrackOption[];
+  subtitleTracks: VideoSubtitleTrackOption[];
+}
+
 interface MediaPlayerContextValue {
   isOpen: Accessor<boolean>;
   queue: Accessor<PlayerQueueItem[]>;
@@ -78,6 +119,7 @@ interface MediaPlayerContextValue {
 
 const PLAYER_VOLUME_STORAGE_KEY = 'solari-player-volume';
 const PLAYER_MUTED_STORAGE_KEY = 'solari-player-muted';
+const PLAYER_PREFERRED_AUDIO_LANGUAGE_STORAGE_KEY = 'solari-player-preferred-audio-language';
 
 const MediaPlayerContext = createContext<MediaPlayerContextValue>();
 
@@ -174,12 +216,33 @@ export function MediaPlayerPanel() {
     plainLyrics: null,
     error: null,
   });
+  const [lastScrolledLyricIndex, setLastScrolledLyricIndex] = createSignal<number | null>(null);
+  const [trackMetadata, setTrackMetadata] = createSignal<{
+    trackId: number | null;
+    title: string | null;
+    artist: string | null;
+    album: string | null;
+  }>({
+    trackId: null,
+    title: null,
+    artist: null,
+    album: null,
+  });
+  const [videoAudioTracks, setVideoAudioTracks] = createSignal<VideoAudioTrackOption[]>([]);
+  const [videoSubtitleTracks, setVideoSubtitleTracks] = createSignal<VideoSubtitleTrackOption[]>([]);
+  const [selectedVideoAudioStreamIndex, setSelectedVideoAudioStreamIndex] = createSignal<number | null>(null);
+  const [selectedVideoSubtitleTrackId, setSelectedVideoSubtitleTrackId] = createSignal<string | null>(null);
+  const [selectedVideoSubtitleSrc, setSelectedVideoSubtitleSrc] = createSignal<string | null>(null);
+  const [preferredAudioLanguage, setPreferredAudioLanguage] = createSignal<string | null>(null);
 
   let videoRef: HTMLVideoElement | undefined;
   let audioRef: HTMLAudioElement | undefined;
   let panelRef: HTMLDivElement | undefined;
   let videoStageRef: HTMLDivElement | undefined;
   let controlsHideTimeout: ReturnType<typeof setTimeout> | undefined;
+  let lyricsListRef: HTMLDivElement | undefined;
+  let lyricsScrollAnimationFrame: number | null = null;
+  let lyricsScrollTargetTop = 0;
 
   const getActiveElement = (): HTMLMediaElement | null => {
     const item = player.currentItem();
@@ -204,6 +267,11 @@ export function MediaPlayerPanel() {
     return item?.mediaKind === 'track' ? item.mediaId : null;
   });
   const showInlineControls = createMemo(() => !isVideoMode() || !isFullscreen());
+  const selectedVideoSubtitleTrack = createMemo(() => {
+    const selectedId = selectedVideoSubtitleTrackId();
+    if (!selectedId) return null;
+    return videoSubtitleTracks().find((track) => track.id === selectedId) || null;
+  });
   const filteredLibraryItems = createMemo(() => {
     const query = libraryQuery().trim().toLowerCase();
     const allowedKind = currentPlaylistKind();
@@ -225,6 +293,20 @@ export function MediaPlayerPanel() {
     return clamp((position / duration) * 100, 0, 100);
   });
   const lyricsLines = createMemo(() => parseLrc(lyricsState().syncedLrc ?? ''));
+  const audioDisplayTitle = createMemo(() => {
+    const item = player.currentItem();
+    if (item?.mediaKind !== 'track') return item?.title || '';
+    return trackMetadata().title || item.title;
+  });
+  const audioDisplaySubtitle = createMemo(() => {
+    const item = player.currentItem();
+    if (item?.mediaKind !== 'track') return item?.subtitle || '';
+    const meta = trackMetadata();
+    if (meta.artist && meta.album) return `${meta.artist} - ${meta.album}`;
+    if (meta.artist) return meta.artist;
+    if (meta.album) return meta.album;
+    return item.subtitle || '';
+  });
   const activeLyricIndex = createMemo(() => {
     if (lyricsState().status !== 'ready') return -1;
     const lines = lyricsLines();
@@ -235,7 +317,7 @@ export function MediaPlayerPanel() {
         return index;
       }
     }
-    return -1;
+    return 0;
   });
 
   const syncElementVolume = () => {
@@ -265,6 +347,127 @@ export function MediaPlayerPanel() {
     if (!isFullscreen()) return;
     setShowFullscreenControls(true);
     scheduleFullscreenControlsHide();
+  };
+
+  const cancelLyricsScrollAnimation = () => {
+    if (lyricsScrollAnimationFrame !== null && typeof window !== 'undefined') {
+      window.cancelAnimationFrame(lyricsScrollAnimationFrame);
+      lyricsScrollAnimationFrame = null;
+    }
+  };
+
+  const ensureLyricsScrollRunner = () => {
+    if (typeof window === 'undefined') return;
+    const list = lyricsListRef;
+    if (!list) return;
+    if (lyricsScrollAnimationFrame !== null) return;
+
+    const step = () => {
+      const activeList = lyricsListRef;
+      if (!activeList) {
+        lyricsScrollAnimationFrame = null;
+        return;
+      }
+
+      const delta = lyricsScrollTargetTop - activeList.scrollTop;
+      if (Math.abs(delta) < 0.6) {
+        activeList.scrollTop = lyricsScrollTargetTop;
+        lyricsScrollAnimationFrame = null;
+        return;
+      }
+
+      // Smooth pursuit to avoid jumpy restarts between fast lyric transitions.
+      activeList.scrollTop += delta * 0.038;
+      lyricsScrollAnimationFrame = window.requestAnimationFrame(step);
+    };
+
+    lyricsScrollAnimationFrame = window.requestAnimationFrame(step);
+  };
+
+  const scrollLyricsToActiveLine = (activeIndex: number) => {
+    if (typeof window === 'undefined') return;
+    const list = lyricsListRef;
+    if (!list) return;
+    const target = list.querySelector(`[data-lyric-index="${activeIndex}"]`) as HTMLElement | null;
+    if (!target) return;
+
+    const maxScroll = Math.max(0, list.scrollHeight - list.clientHeight);
+    const targetTop = target.offsetTop - ((list.clientHeight - target.clientHeight) / 2);
+    const destination = clamp(targetTop, 0, maxScroll);
+    lyricsScrollTargetTop = destination;
+    ensureLyricsScrollRunner();
+  };
+
+  const getLyricLineRoleClass = (lineIndex: number): string => {
+    const activeIndex = activeLyricIndex();
+    if (activeIndex < 0) {
+      if (lineIndex === 0) return 'next-primary';
+      if (lineIndex > 0 && lineIndex <= 4) return 'upcoming';
+      return 'far';
+    }
+    const offset = lineIndex - activeIndex;
+    if (offset === 0) return 'active';
+    if (offset === -1) return 'previous';
+    if (offset === 1) return 'next-primary';
+    if (offset > 1 && offset <= 5) return 'upcoming';
+    if (offset < -1 && offset >= -3) return 'near';
+    return 'far';
+  };
+
+  const normalizeLanguageCode = (value: string | null | undefined): string | null => {
+    if (!value) return null;
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized === 'eng' || normalized === 'en') return 'en';
+    if (normalized === 'ita' || normalized === 'it') return 'it';
+    return normalized;
+  };
+
+  const isCompatibilityVideoUrl = (url: string): boolean => (
+    url.includes('/api/media/playback/video-compat/')
+  );
+
+  const buildVideoPlaybackUrl = (item: PlayerQueueItem, options?: { start?: number }): string => {
+    if (typeof window === 'undefined') return item.streamUrl;
+    const streamUrl = new URL(item.streamUrl, window.location.origin);
+    const selectedAudio = selectedVideoAudioStreamIndex();
+    if (Number.isInteger(selectedAudio) && selectedAudio !== null) {
+      streamUrl.searchParams.set('audio', String(selectedAudio));
+    } else {
+      streamUrl.searchParams.delete('audio');
+    }
+
+    const start = options?.start;
+    if (typeof start === 'number' && Number.isFinite(start) && start > 0.05) {
+      streamUrl.searchParams.set('start', String(start));
+    } else {
+      streamUrl.searchParams.delete('start');
+    }
+
+    return `${streamUrl.pathname}${streamUrl.search}`;
+  };
+
+  const buildSubtitleTrackSrc = (item: PlayerQueueItem, track: VideoSubtitleTrackOption): string | null => {
+    if (typeof window === 'undefined') return null;
+    if (item.mediaType !== 'video') return null;
+    if (item.mediaKind !== 'movie' && item.mediaKind !== 'episode') return null;
+
+    const url = new URL(
+      `/api/media/playback/subtitles/${item.mediaKind}/${item.mediaId}`,
+      window.location.origin,
+    );
+    url.searchParams.set('source', track.source);
+    if (track.source === 'embedded' && typeof track.streamIndex === 'number') {
+      url.searchParams.set('stream', String(track.streamIndex));
+    }
+    if (track.source === 'external' && track.fileName) {
+      url.searchParams.set('file', track.fileName);
+    }
+    if (track.source === 'online' && track.onlineToken) {
+      url.searchParams.set('token', track.onlineToken);
+    }
+    url.searchParams.set('t', String(Date.now()));
+    return `${url.pathname}${url.search}`;
   };
 
   const loadPlaybackLibrary = async () => {
@@ -329,6 +532,54 @@ export function MediaPlayerPanel() {
       plainLyrics,
       error: null,
     });
+  };
+
+  const loadTrackMetadata = async (trackId: number) => {
+    const response = await requestJson<TrackMetadataResponse>(`/api/media/music/tracks/${trackId}/meta`);
+    if (response.error || !response.data) {
+      return;
+    }
+
+    if (currentTrackId() !== trackId) return;
+    setTrackMetadata({
+      trackId,
+      title: response.data.title || null,
+      artist: response.data.artist || null,
+      album: response.data.album || null,
+    });
+  };
+
+  const loadVideoPlaybackOptions = async (item: PlayerQueueItem) => {
+    if (item.mediaType !== 'video') return;
+    if (item.mediaKind !== 'movie' && item.mediaKind !== 'episode') return;
+
+    const response = await requestJson<VideoOptionsResponse>(`/api/media/playback/video-options/${item.mediaKind}/${item.mediaId}`);
+    if (response.error || !response.data) {
+      setVideoAudioTracks([]);
+      setVideoSubtitleTracks([]);
+      setSelectedVideoAudioStreamIndex(null);
+      setSelectedVideoSubtitleTrackId(null);
+      setSelectedVideoSubtitleSrc(null);
+      return;
+    }
+
+    const audioTracks = response.data.audioTracks || [];
+    const subtitleTracks = response.data.subtitleTracks || [];
+    setVideoAudioTracks(audioTracks);
+    setVideoSubtitleTracks(subtitleTracks);
+
+    const preferredLanguage = normalizeLanguageCode(preferredAudioLanguage());
+    const languageMatch = preferredLanguage
+      ? audioTracks.find((track) => normalizeLanguageCode(track.language) === preferredLanguage)
+      : null;
+    const defaultTrack = languageMatch
+      || audioTracks.find((track) => track.default)
+      || audioTracks[0]
+      || null;
+
+    setSelectedVideoAudioStreamIndex(defaultTrack ? defaultTrack.streamIndex : null);
+    setSelectedVideoSubtitleTrackId(null);
+    setSelectedVideoSubtitleSrc(null);
   };
 
   const persistProgress = async (options?: { force?: boolean; completed?: boolean }) => {
@@ -580,10 +831,6 @@ export function MediaPlayerPanel() {
     scheduleFullscreenControlsHide(280);
   };
 
-  const isCompatibilityVideoUrl = (url: string): boolean => (
-    url.includes('/api/media/playback/video-compat/')
-  );
-
   const seekByCompatibilityRestart = async (targetSeconds: number) => {
     const item = player.currentItem();
     const mediaElement = getActiveElement();
@@ -592,18 +839,13 @@ export function MediaPlayerPanel() {
     const duration = durationSeconds();
     const clampedTarget = clamp(targetSeconds, 0, duration > 0 ? duration : targetSeconds);
     const wasPlaying = !mediaElement.paused;
-    const streamUrl = new URL(item.streamUrl, window.location.origin);
-    if (clampedTarget > 0.05) {
-      streamUrl.searchParams.set('start', String(clampedTarget));
-    } else {
-      streamUrl.searchParams.delete('start');
-    }
+    const playbackUrl = buildVideoPlaybackUrl(item, { start: clampedTarget });
 
     setAutoplayRequested(wasPlaying);
     setResumeSeconds(null);
     setDidApplyResume(true);
     setCompatibilitySeekBaseSeconds(clampedTarget);
-    mediaElement.src = streamUrl.pathname + streamUrl.search;
+    mediaElement.src = playbackUrl;
     mediaElement.currentTime = 0;
     mediaElement.load();
     setCurrentSeconds(clampedTarget);
@@ -770,6 +1012,54 @@ export function MediaPlayerPanel() {
     </div>
   );
 
+  const renderVideoTrackSelectors = () => {
+    const item = player.currentItem();
+    if (!item || item.mediaType !== 'video') return null;
+
+    return (
+      <div class="media-player-track-selectors">
+        <label class="media-player-track-select">
+          <span>Audio</span>
+          <select
+            value={selectedVideoAudioStreamIndex() === null ? '' : String(selectedVideoAudioStreamIndex())}
+            onChange={(event) => {
+              const raw = event.currentTarget.value;
+              const nextStream = raw ? Number.parseInt(raw, 10) : NaN;
+              if (!Number.isFinite(nextStream)) {
+                setSelectedVideoAudioStreamIndex(null);
+                return;
+              }
+              const selectedTrack = videoAudioTracks().find((track) => track.streamIndex === nextStream);
+              if (selectedTrack?.language) {
+                setPreferredAudioLanguage(normalizeLanguageCode(selectedTrack.language));
+              }
+              setSelectedVideoAudioStreamIndex(nextStream);
+            }}
+          >
+            {videoAudioTracks().map((track) => (
+              <option value={String(track.streamIndex)}>{track.label}</option>
+            ))}
+          </select>
+        </label>
+        <label class="media-player-track-select">
+          <span>Subtitles</span>
+          <select
+            value={selectedVideoSubtitleTrackId() || ''}
+            onChange={(event) => {
+              const raw = event.currentTarget.value;
+              setSelectedVideoSubtitleTrackId(raw.length > 0 ? raw : null);
+            }}
+          >
+            <option value="">Off</option>
+            {videoSubtitleTracks().map((track) => (
+              <option value={track.id}>{track.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+    );
+  };
+
   const renderControls = (mode: 'inline' | 'overlay' = 'inline') => (
     <div class={`media-player-controls ${mode === 'overlay' ? 'overlay' : ''}`}>
       <div class="media-player-buttons">
@@ -830,6 +1120,9 @@ export function MediaPlayerPanel() {
           }}
         />
       </div>
+      <Show when={mode === 'inline' && player.currentItem()?.mediaType === 'video'}>
+        {renderVideoTrackSelectors()}
+      </Show>
     </div>
   );
 
@@ -940,14 +1233,14 @@ export function MediaPlayerPanel() {
           </div>
         )}
       >
-        <div class="media-player-lyrics-list" ref={lyricsListRef}>
+        <div class="media-player-lyrics-stage" ref={lyricsListRef} aria-live="polite">
           {lyricsLines().map((line, index) => (
-            <div
-              class={`media-player-lyrics-line ${index === activeLyricIndex() ? 'active' : ''}`}
+            <p
+              class={`media-player-lyrics-line ${getLyricLineRoleClass(index)}`}
               data-lyric-index={index}
             >
               {line.text}
-            </div>
+            </p>
           ))}
         </div>
       </Show>
@@ -959,7 +1252,9 @@ export function MediaPlayerPanel() {
       <div class="media-player-playlist-head">
         <div class="media-player-playlist-title">
           <h4>{audioPanelMode() === 'lyrics' ? 'Lyrics' : 'Current Playlist'}</h4>
-          <span>{player.queue().length} item{player.queue().length === 1 ? '' : 's'}</span>
+          <Show when={audioPanelMode() === 'playlist'}>
+            <span>{player.queue().length} item{player.queue().length === 1 ? '' : 's'}</span>
+          </Show>
         </div>
         <Show when={currentTrackId() !== null}>
           <div class="media-player-panel-toggle" role="group" aria-label="Playlist or lyrics">
@@ -1011,6 +1306,11 @@ export function MediaPlayerPanel() {
       setMuted(true);
     }
 
+    const storedPreferredAudioLanguage = window.localStorage.getItem(PLAYER_PREFERRED_AUDIO_LANGUAGE_STORAGE_KEY);
+    if (storedPreferredAudioLanguage) {
+      setPreferredAudioLanguage(storedPreferredAudioLanguage);
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!player.isOpen()) return;
       const target = event.target as HTMLElement | null;
@@ -1049,6 +1349,7 @@ export function MediaPlayerPanel() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       clearControlsHideTimeout();
+      cancelLyricsScrollAnimation();
     });
   });
 
@@ -1056,6 +1357,12 @@ export function MediaPlayerPanel() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(PLAYER_VOLUME_STORAGE_KEY, String(volume()));
     window.localStorage.setItem(PLAYER_MUTED_STORAGE_KEY, String(muted()));
+    const preferredLanguage = preferredAudioLanguage();
+    if (preferredLanguage) {
+      window.localStorage.setItem(PLAYER_PREFERRED_AUDIO_LANGUAGE_STORAGE_KEY, preferredLanguage);
+    } else {
+      window.localStorage.removeItem(PLAYER_PREFERRED_AUDIO_LANGUAGE_STORAGE_KEY);
+    }
   });
 
   createEffect(() => {
@@ -1118,7 +1425,9 @@ export function MediaPlayerPanel() {
         setIsPlaying(false);
 
         // Ensure we always switch to the newly selected stream before load().
-        mediaElement.src = item.streamUrl;
+        mediaElement.src = item.mediaType === 'video'
+          ? buildVideoPlaybackUrl(item)
+          : item.streamUrl;
         mediaElement.currentTime = 0;
         mediaElement.load();
         syncElementVolume();
@@ -1133,6 +1442,12 @@ export function MediaPlayerPanel() {
   createEffect(() => {
     const trackId = currentTrackId();
     if (!trackId) {
+      setTrackMetadata({
+        trackId: null,
+        title: null,
+        artist: null,
+        album: null,
+      });
       setLyricsState({
         trackId: null,
         status: 'idle',
@@ -1141,6 +1456,7 @@ export function MediaPlayerPanel() {
         error: null,
       });
       setAudioPanelMode('playlist');
+      setLastScrolledLyricIndex(null);
       return;
     }
 
@@ -1154,6 +1470,16 @@ export function MediaPlayerPanel() {
       });
       setLastScrolledLyricIndex(null);
     }
+
+    if (trackMetadata().trackId !== trackId) {
+      setTrackMetadata({
+        trackId,
+        title: null,
+        artist: null,
+        album: null,
+      });
+      void loadTrackMetadata(trackId);
+    }
   });
 
   createEffect(() => {
@@ -1166,17 +1492,62 @@ export function MediaPlayerPanel() {
   });
 
   createEffect(() => {
-    if (audioPanelMode() !== 'lyrics') return;
+    if (audioPanelMode() !== 'lyrics') {
+      setLastScrolledLyricIndex(null);
+      cancelLyricsScrollAnimation();
+      return;
+    }
     const activeIndex = activeLyricIndex();
     if (activeIndex < 0 || activeIndex === lastScrolledLyricIndex()) return;
-    const list = lyricsListRef;
-    if (!list) return;
-    const target = list.querySelector(`[data-lyric-index="${activeIndex}"]`) as HTMLElement | null;
-    if (!target) return;
     setLastScrolledLyricIndex(activeIndex);
-    requestAnimationFrame(() => {
-      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    queueMicrotask(() => {
+      scrollLyricsToActiveLine(activeIndex);
     });
+  });
+
+  createEffect(() => {
+    const trackId = currentTrackId();
+    if (!trackId) return;
+    if (trackMetadata().trackId !== trackId) return;
+    if (trackMetadata().title) return;
+    void loadTrackMetadata(trackId);
+  });
+
+  createEffect(() => {
+    const item = player.currentItem();
+    if (!item || item.mediaType !== 'video' || (item.mediaKind !== 'movie' && item.mediaKind !== 'episode')) {
+      setVideoAudioTracks([]);
+      setVideoSubtitleTracks([]);
+      setSelectedVideoAudioStreamIndex(null);
+      setSelectedVideoSubtitleTrackId(null);
+      setSelectedVideoSubtitleSrc(null);
+      return;
+    }
+    void loadVideoPlaybackOptions(item);
+  });
+
+  createEffect(() => {
+    const item = player.currentItem();
+    const subtitleTrack = selectedVideoSubtitleTrack();
+    if (!item || !subtitleTrack || item.mediaType !== 'video') {
+      setSelectedVideoSubtitleSrc(null);
+      return;
+    }
+    const src = buildSubtitleTrackSrc(item, subtitleTrack);
+    setSelectedVideoSubtitleSrc(src);
+  });
+
+  createEffect(() => {
+    const item = player.currentItem();
+    if (!item || item.mediaType !== 'video') return;
+    if (!isCompatibilityVideoUrl(item.streamUrl)) return;
+    const selectedAudio = selectedVideoAudioStreamIndex();
+    if (selectedAudio === null) return;
+    if (!videoRef) return;
+    if (Number.isFinite(videoRef.currentTime)) {
+      const stableCurrentSeconds = untrack(currentSeconds);
+      void seekByCompatibilityRestart(stableCurrentSeconds);
+    }
   });
 
   return (
@@ -1187,13 +1558,15 @@ export function MediaPlayerPanel() {
       >
         <div class="media-player-main">
           <div class="media-player-head">
-            <div class="media-player-titles">
-              <p class="media-player-kicker">{player.currentItem()?.mediaType === 'audio' ? 'Now Playing' : 'Now Watching'}</p>
-              <h3>{player.currentItem()?.title}</h3>
-              <Show when={player.currentItem()?.subtitle}>
-                <p class="media-player-subtitle">{player.currentItem()?.subtitle}</p>
-              </Show>
-            </div>
+            <Show when={player.currentItem()?.mediaType !== 'audio'}>
+              <div class="media-player-titles">
+                <p class="media-player-kicker">Now Watching</p>
+                <h3>{player.currentItem()?.title}</h3>
+                <Show when={player.currentItem()?.subtitle}>
+                  <p class="media-player-subtitle">{player.currentItem()?.subtitle}</p>
+                </Show>
+              </div>
+            </Show>
 
             <div class="media-player-head-actions">
               <Show when={player.currentItem()?.mediaType === 'video'}>
@@ -1234,15 +1607,19 @@ export function MediaPlayerPanel() {
                     <img
                       class="media-player-audio-artwork"
                       src={player.currentItem()?.artworkUrl || ''}
-                      alt={`${player.currentItem()?.subtitle || player.currentItem()?.title || 'Album'} artwork`}
+                      alt={`${audioDisplaySubtitle() || audioDisplayTitle() || 'Album'} artwork`}
                       onError={() => setArtworkLoadFailed(true)}
                     />
                   </Show>
                   <div class="media-player-audio-caption">
-                    <h4>{player.currentItem()?.title}</h4>
-                    <Show when={player.currentItem()?.subtitle}>
-                      <p>{player.currentItem()?.subtitle}</p>
+                    <h4>{audioDisplayTitle()}</h4>
+                    <Show when={audioDisplaySubtitle()}>
+                      <p>{audioDisplaySubtitle()}</p>
                     </Show>
+                    <div class="media-player-audio-transport">
+                      {renderProgress('inline')}
+                      {renderControls('inline')}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1284,7 +1661,7 @@ export function MediaPlayerPanel() {
                 ref={videoRef}
                 class="media-player-video"
                 preload="metadata"
-                src={player.currentItem()?.streamUrl}
+                src={player.currentItem()?.mediaType === 'video' ? buildVideoPlaybackUrl(player.currentItem()!) : player.currentItem()?.streamUrl}
                 onLoadedMetadata={handleLoadedMetadata}
                 onCanPlay={handleCanPlay}
                 onTimeUpdate={handleTimeUpdate}
@@ -1295,7 +1672,17 @@ export function MediaPlayerPanel() {
                 }}
                 onEnded={handleEnded}
                 onError={handleMediaError}
-              />
+              >
+                <Show when={selectedVideoSubtitleSrc()}>
+                  <track
+                    kind="subtitles"
+                    src={selectedVideoSubtitleSrc() || ''}
+                    srclang={selectedVideoSubtitleTrack()?.language || 'en'}
+                    label={selectedVideoSubtitleTrack()?.label || 'Subtitle'}
+                    default={true}
+                  />
+                </Show>
+              </video>
 
               <Show when={isFullscreen()}>
                 <div class={`media-player-overlay-controls ${showFullscreenControls() ? 'visible' : ''}`}>
@@ -1306,7 +1693,7 @@ export function MediaPlayerPanel() {
             </div>
           </Show>
 
-          <Show when={showInlineControls()}>
+          <Show when={showInlineControls() && player.currentItem()?.mediaType === 'video'}>
             {renderProgress('inline')}
             {renderControls('inline')}
           </Show>

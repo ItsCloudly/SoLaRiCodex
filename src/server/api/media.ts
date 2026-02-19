@@ -6,6 +6,8 @@ import path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { gunzipSync } from 'node:zlib';
+import crypto from 'node:crypto';
 import { db } from '../db/connection';
 import { albums, artists, downloads, episodes, media, movies, series, settings, tracks, trackLyrics } from '../db/schema';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
@@ -88,6 +90,7 @@ const AUDIO_FILE_EXTENSIONS = new Set([
 const PLAYABLE_VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv']);
 const PLAYABLE_AUDIO_EXTENSIONS = new Set(['.mp3', '.flac']);
 const IMAGE_FILE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif']);
+const SUBTITLE_FILE_EXTENSIONS = new Set(['.srt', '.vtt', '.ass', '.ssa']);
 const ALBUM_ARTWORK_PRIORITY_NAMES = [
   'cover',
   'folder',
@@ -100,11 +103,15 @@ const PLAYBACK_PROGRESS_SETTING_KEY = 'player.playback.progress.v1';
 const PLAYBACK_PROGRESS_MAX_ITEMS = 800;
 const MKV_COMPAT_STREAM_START_TIMEOUT_MS = 15_000;
 const LRCLIB_BASE_URL = 'https://lrclib.net/api/get';
+const OPENSUBTITLES_API_BASE_URL = 'https://api.opensubtitles.com/api/v1';
 const seriesFilesystemSyncCache = new Map<number, number>();
 let lastMoviesFilesystemSyncAt = 0;
 let lastMusicFilesystemSyncAt = 0;
 let ffmpegStaticBinaryPath: string | null = null;
 let ffmpegBinaryPathCache: string | null | undefined;
+let ffprobeBinaryPathCache: string | null | undefined;
+const onlineSubtitleTokenStore = new Map<string, { url: string; fileName: string | null; expiresAt: number }>();
+const ONLINE_SUBTITLE_TOKEN_TTL_MS = 1000 * 60 * 20;
 
 try {
   const resolvedStaticPath = require('ffmpeg-static');
@@ -1965,6 +1972,35 @@ interface ProcessRunResult {
   stderr: string;
 }
 
+interface ProcessCaptureResult {
+  success: boolean;
+  stdout: string;
+  stderr: string;
+}
+
+interface PlaybackAudioTrackOption {
+  source: 'embedded';
+  streamIndex: number;
+  language: string | null;
+  title: string | null;
+  codec: string | null;
+  channels: number | null;
+  default: boolean;
+}
+
+interface PlaybackSubtitleTrackOption {
+  source: 'embedded' | 'external' | 'online';
+  streamIndex?: number;
+  fileName?: string;
+  filePath?: string;
+  onlineToken?: string;
+  downloadUrl?: string;
+  language: string | null;
+  title: string | null;
+  codec: string | null;
+  default: boolean;
+}
+
 async function runProcessCommand(
   command: string,
   args: string[],
@@ -2012,6 +2048,68 @@ async function runProcessCommand(
   });
 }
 
+async function runProcessCaptureOutput(
+  command: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<ProcessCaptureResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let stdoutOutput = '';
+    let stderrOutput = '';
+
+    const child = spawn(command, args, {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const settle = (result: ProcessCaptureResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    const timeoutHandle = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // no-op
+      }
+      settle({ success: false, stdout: stdoutOutput.trim(), stderr: 'Timed out while running external command.' });
+    }, timeoutMs);
+
+    child.stdout?.on('data', (chunk) => {
+      if (stdoutOutput.length < 100_000) {
+        stdoutOutput += String(chunk);
+      }
+    });
+
+    child.stderr?.on('data', (chunk) => {
+      if (stderrOutput.length < 12_000) {
+        stderrOutput += String(chunk);
+      }
+    });
+
+    child.on('error', (error) => {
+      clearTimeout(timeoutHandle);
+      settle({
+        success: false,
+        stdout: stdoutOutput.trim(),
+        stderr: error instanceof Error ? error.message : 'Command execution failed.',
+      });
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timeoutHandle);
+      settle({
+        success: code === 0,
+        stdout: stdoutOutput.trim(),
+        stderr: stderrOutput.trim(),
+      });
+    });
+  });
+}
+
 async function resolveFfmpegBinaryPath(): Promise<string | null> {
   if (ffmpegBinaryPathCache !== undefined) {
     return ffmpegBinaryPathCache;
@@ -2036,6 +2134,295 @@ async function resolveFfmpegBinaryPath(): Promise<string | null> {
 
   ffmpegBinaryPathCache = null;
   return null;
+}
+
+async function resolveFfprobeBinaryPath(): Promise<string | null> {
+  if (ffprobeBinaryPathCache !== undefined) {
+    return ffprobeBinaryPathCache;
+  }
+
+  const derivedProbePath = ffmpegStaticBinaryPath
+    ? path.join(path.dirname(ffmpegStaticBinaryPath), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe')
+    : null;
+
+  const candidates = [
+    process.env.SOLARI_FFPROBE_PATH,
+    process.env.FFPROBE_PATH,
+    derivedProbePath,
+    'ffprobe',
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim());
+
+  for (const candidate of candidates) {
+    const result = await runProcessCommand(candidate, ['-version'], 10_000);
+    if (result.success) {
+      ffprobeBinaryPathCache = candidate;
+      return candidate;
+    }
+  }
+
+  ffprobeBinaryPathCache = null;
+  return null;
+}
+
+function normalizeIsoLanguage(language: string | null | undefined): string | null {
+  if (!language) return null;
+  const normalized = language.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'eng' || normalized === 'en') return 'en';
+  if (normalized === 'ita' || normalized === 'it') return 'it';
+  if (normalized === 'jpn' || normalized === 'ja') return 'ja';
+  if (normalized === 'spa' || normalized === 'es') return 'es';
+  if (normalized === 'fra' || normalized === 'fr') return 'fr';
+  if (normalized === 'deu' || normalized === 'ger' || normalized === 'de') return 'de';
+  return normalized;
+}
+
+function inferSubtitleLanguageFromFileName(fileName: string): string | null {
+  const stem = path.parse(fileName).name.toLowerCase();
+  if (/\b(eng|english|en)\b/.test(stem)) return 'en';
+  if (/\b(ita|italian|italiano|it)\b/.test(stem)) return 'it';
+  if (/\b(spa|spanish|es)\b/.test(stem)) return 'es';
+  if (/\b(fra|fre|french|fr)\b/.test(stem)) return 'fr';
+  if (/\b(deu|ger|german|de)\b/.test(stem)) return 'de';
+  return null;
+}
+
+async function probePlaybackTracks(filePath: string): Promise<{
+  audio: PlaybackAudioTrackOption[];
+  subtitles: PlaybackSubtitleTrackOption[];
+}> {
+  const ffprobeBinary = await resolveFfprobeBinaryPath();
+  const audioTracks: PlaybackAudioTrackOption[] = [];
+  const subtitleTracks: PlaybackSubtitleTrackOption[] = [];
+
+  if (!ffprobeBinary) {
+    return { audio: [], subtitles: [] };
+  }
+
+  const probe = await runProcessCaptureOutput(
+    ffprobeBinary,
+    [
+      '-v', 'error',
+      '-show_entries', 'stream=index,codec_type,codec_name,channels:stream_tags=language,title',
+      '-show_entries', 'stream_disposition=default',
+      '-of', 'json',
+      filePath,
+    ],
+    12_000,
+  );
+
+  if (!probe.success || probe.stdout.length === 0) {
+    return { audio: [], subtitles: [] };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(probe.stdout);
+  } catch {
+    return { audio: [], subtitles: [] };
+  }
+
+  const streams = (
+    parsed
+    && typeof parsed === 'object'
+    && 'streams' in parsed
+    && Array.isArray((parsed as { streams?: unknown[] }).streams)
+  )
+    ? (parsed as { streams: Array<Record<string, unknown>> }).streams
+    : [];
+
+  for (const stream of streams) {
+    const streamIndex = typeof stream.index === 'number' ? stream.index : -1;
+    if (streamIndex < 0) continue;
+    const codecType = typeof stream.codec_type === 'string' ? stream.codec_type : '';
+    const codec = typeof stream.codec_name === 'string' ? stream.codec_name : null;
+    const tags = (stream.tags && typeof stream.tags === 'object') ? stream.tags as Record<string, unknown> : {};
+    const language = normalizeIsoLanguage(typeof tags.language === 'string' ? tags.language : null);
+    const title = typeof tags.title === 'string' ? tags.title.trim() : null;
+    const disposition = (stream.disposition && typeof stream.disposition === 'object')
+      ? stream.disposition as Record<string, unknown>
+      : {};
+    const isDefault = disposition.default === 1 || disposition.default === true;
+
+    if (codecType === 'audio') {
+      audioTracks.push({
+        source: 'embedded',
+        streamIndex,
+        language,
+        title: title && title.length > 0 ? title : null,
+        codec,
+        channels: typeof stream.channels === 'number' ? stream.channels : null,
+        default: isDefault,
+      });
+      continue;
+    }
+
+    if (codecType === 'subtitle') {
+      subtitleTracks.push({
+        source: 'embedded',
+        streamIndex,
+        language,
+        title: title && title.length > 0 ? title : null,
+        codec,
+        default: isDefault,
+      });
+    }
+  }
+
+  return {
+    audio: audioTracks,
+    subtitles: subtitleTracks,
+  };
+}
+
+async function collectExternalSubtitleTracks(videoFilePath: string): Promise<PlaybackSubtitleTrackOption[]> {
+  const directory = path.dirname(videoFilePath);
+  const videoStem = path.parse(videoFilePath).name.toLowerCase();
+  let entries: Array<Dirent<string>>;
+  try {
+    entries = await readdir(directory, { withFileTypes: true, encoding: 'utf8' });
+  } catch {
+    return [];
+  }
+
+  const matches = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => String(entry.name))
+    .filter((fileName) => SUBTITLE_FILE_EXTENSIONS.has(path.extname(fileName).toLowerCase()))
+    .filter((fileName) => {
+      const stem = path.parse(fileName).name.toLowerCase();
+      return stem === videoStem || stem.startsWith(`${videoStem}.`) || stem.startsWith(`${videoStem} `) || stem.includes(videoStem);
+    })
+    .sort((a, b) => a.localeCompare(b));
+
+  return matches.map((fileName) => ({
+    source: 'external' as const,
+    fileName,
+    filePath: path.join(directory, fileName),
+    language: inferSubtitleLanguageFromFileName(fileName),
+    title: path.parse(fileName).name,
+    codec: path.extname(fileName).toLowerCase().slice(1),
+    default: false,
+  }));
+}
+
+function cleanupExpiredOnlineSubtitleTokens(): void {
+  const now = Date.now();
+  for (const [token, value] of onlineSubtitleTokenStore.entries()) {
+    if (value.expiresAt <= now) {
+      onlineSubtitleTokenStore.delete(token);
+    }
+  }
+}
+
+function ensureVttTextFromSubtitleText(input: string): string {
+  const normalized = input.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (/^\s*WEBVTT/i.test(normalized)) {
+    return normalized;
+  }
+
+  // Minimal SRT -> VTT conversion for online subtitle payloads.
+  const withTimestamps = normalized.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+  const lines = withTimestamps
+    .split('\n')
+    .filter((line, index, all) => {
+      const trimmed = line.trim();
+      // Drop SRT cue sequence numbers.
+      if (/^\d+$/.test(trimmed)) {
+        const prev = all[index - 1]?.trim() || '';
+        const next = all[index + 1]?.trim() || '';
+        if ((index === 0 || prev.length === 0) && next.includes('-->')) {
+          return false;
+        }
+      }
+      return true;
+    });
+  return `WEBVTT\n\n${lines.join('\n')}`;
+}
+
+async function fetchOnlineSubtitleTracksFromOpenSubtitles(videoFilePath: string): Promise<PlaybackSubtitleTrackOption[]> {
+  const apiKey = process.env.OPENSUBTITLES_API_KEY?.trim();
+  if (!apiKey) return [];
+
+  const query = path.parse(videoFilePath).name.trim();
+  if (!query) return [];
+
+  const url = new URL(`${OPENSUBTITLES_API_BASE_URL}/subtitles`);
+  url.searchParams.set('query', query);
+  url.searchParams.set('languages', 'en,it');
+  url.searchParams.set('order_by', 'download_count');
+  url.searchParams.set('order_direction', 'desc');
+
+  const response = await fetch(url, {
+    headers: {
+      'Api-Key': apiKey,
+      'User-Agent': 'SoLaRi v1.0',
+      Accept: 'application/json',
+    },
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!response.ok) return [];
+
+  const payload = await response.json();
+  const data = Array.isArray(payload?.data) ? payload.data : [];
+  const tracks: PlaybackSubtitleTrackOption[] = [];
+  cleanupExpiredOnlineSubtitleTokens();
+
+  for (const item of data.slice(0, 8)) {
+    const attributes = item?.attributes;
+    if (!attributes || typeof attributes !== 'object') continue;
+    const language = normalizeIsoLanguage(typeof attributes.language === 'string' ? attributes.language : null);
+    if (language !== 'en' && language !== 'it') continue;
+    const files = Array.isArray(attributes.files) ? attributes.files : [];
+    const file = files[0];
+    const fileId = typeof file?.file_id === 'number' ? file.file_id : null;
+    if (!fileId) continue;
+
+    const downloadResponse = await fetch(`${OPENSUBTITLES_API_BASE_URL}/download`, {
+      method: 'POST',
+      headers: {
+        'Api-Key': apiKey,
+        'User-Agent': 'SoLaRi v1.0',
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ file_id: fileId }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!downloadResponse.ok) continue;
+    const downloadPayload = await downloadResponse.json();
+    const downloadUrl = typeof downloadPayload?.link === 'string' ? downloadPayload.link : null;
+    if (!downloadUrl) continue;
+
+    const token = crypto.randomUUID();
+    const fileName = typeof attributes.files?.[0]?.file_name === 'string'
+      ? String(attributes.files[0].file_name)
+      : null;
+    onlineSubtitleTokenStore.set(token, {
+      url: downloadUrl,
+      fileName,
+      expiresAt: Date.now() + ONLINE_SUBTITLE_TOKEN_TTL_MS,
+    });
+
+    const release = typeof attributes.release === 'string' ? attributes.release : null;
+    tracks.push({
+      source: 'online',
+      onlineToken: token,
+      fileName: fileName || undefined,
+      language,
+      title: release || fileName || null,
+      codec: null,
+      default: false,
+      downloadUrl,
+    });
+
+    if (tracks.length >= 4) break;
+  }
+
+  return tracks;
 }
 
 function parseDurationSecondsFromFfmpegOutput(stderrOutput: string): number | null {
@@ -2221,9 +2608,18 @@ async function buildMkvCompatibilityStreamResponse(c: Context, filePath: string)
     ? ['-ss', String(startSeconds), '-i', filePath]
     : ['-i', filePath];
 
+  const requestedAudioStreamRaw = c.req.query('audio');
+  const requestedAudioStream = requestedAudioStreamRaw ? Number.parseInt(requestedAudioStreamRaw, 10) : NaN;
+  const probedTracks = await probePlaybackTracks(filePath);
+  const availableAudioStreamIndexes = new Set(probedTracks.audio.map((track) => track.streamIndex));
+  const audioMapSpecifier = Number.isInteger(requestedAudioStream) && requestedAudioStream >= 0
+    && availableAudioStreamIndexes.has(requestedAudioStream)
+    ? `0:${requestedAudioStream}`
+    : '0:a:0?';
+
   const outputArgs = [
     '-map', '0:v:0',
-    '-map', '0:a:0?',
+    '-map', audioMapSpecifier,
     '-dn',
     '-sn',
     '-c:a', 'aac',
@@ -2395,6 +2791,16 @@ async function resolveTrackPlaybackFile(trackId: number): Promise<string | null>
   if (!(await isExistingFile(resolvedPath))) return null;
   if (!isPlayableFile(resolvedPath, PLAYABLE_AUDIO_EXTENSIONS)) return null;
   return resolvedPath;
+}
+
+async function resolveVideoPlaybackFileByKind(kind: 'movie' | 'episode', id: number): Promise<string | null> {
+  if (kind === 'movie') return resolveMoviePlaybackFile(id);
+  return resolveEpisodePlaybackFile(id);
+}
+
+function parseVideoKind(value: string): 'movie' | 'episode' | null {
+  if (value === 'movie' || value === 'episode') return value;
+  return null;
 }
 
 function parseRangeHeader(rangeHeader: string, fileSize: number): { start: number; end: number } | null {
@@ -3180,6 +3586,53 @@ mediaRoutes.get('/music/tracks/:id/lyrics', async (c) => {
   }
 });
 
+// Get canonical metadata for a track (title/artist/album) for player display
+mediaRoutes.get('/music/tracks/:id/meta', async (c) => {
+  const id = parseIdParam(c.req.param('id'));
+  if (id === null) return c.json({ error: 'Invalid track id' }, 400);
+
+  const trackResult = await db
+    .select({
+      trackId: tracks.id,
+      title: media.title,
+      albumId: tracks.albumId,
+    })
+    .from(tracks)
+    .innerJoin(media, eq(tracks.mediaId, media.id))
+    .where(eq(tracks.id, id))
+    .limit(1);
+
+  if (!trackResult[0]) return c.json({ error: 'Track not found' }, 404);
+
+  const albumResult = await db
+    .select({
+      artistId: albums.artistId,
+      albumTitle: media.title,
+    })
+    .from(albums)
+    .innerJoin(media, eq(albums.mediaId, media.id))
+    .where(eq(albums.id, trackResult[0].albumId))
+    .limit(1);
+
+  const artistResult = albumResult[0]
+    ? await db
+      .select({
+        artistTitle: media.title,
+      })
+      .from(artists)
+      .innerJoin(media, eq(artists.mediaId, media.id))
+      .where(eq(artists.id, albumResult[0].artistId))
+      .limit(1)
+    : [];
+
+  return c.json({
+    trackId: trackResult[0].trackId,
+    title: trackResult[0].title,
+    artist: artistResult[0]?.artistTitle ?? null,
+    album: albumResult[0]?.albumTitle ?? null,
+  });
+});
+
 // Get locally playable media options for player queue additions
 mediaRoutes.get('/playback/library', async (c) => {
   interface PlaybackLibraryItem {
@@ -3478,6 +3931,228 @@ mediaRoutes.put('/playback/progress', async (c) => {
   progressMap[progressKey] = entry;
   await writePlaybackProgressMap(progressMap);
   return c.json({ cleared: false, entry });
+});
+
+// Get selectable audio/subtitle tracks for a video item.
+mediaRoutes.get('/playback/video-options/:kind/:id', async (c) => {
+  const kind = parseVideoKind(c.req.param('kind'));
+  const id = parseIdParam(c.req.param('id'));
+  if (!kind) return c.json({ error: 'Invalid video kind' }, 400);
+  if (id === null) return c.json({ error: 'Invalid media id' }, 400);
+
+  const filePath = await resolveVideoPlaybackFileByKind(kind, id);
+  if (!filePath) return c.json({ error: 'No playable file found' }, 404);
+
+  const embedded = await probePlaybackTracks(filePath);
+  const externalSubtitleTracks = await collectExternalSubtitleTracks(filePath);
+  const onlineSubtitleTracks = await fetchOnlineSubtitleTracksFromOpenSubtitles(filePath);
+
+  const audioTracks = embedded.audio
+    .map((track, index) => ({
+      id: `embedded-audio-${track.streamIndex}`,
+      source: track.source,
+      streamIndex: track.streamIndex,
+      language: track.language,
+      title: track.title,
+      codec: track.codec,
+      channels: track.channels,
+      default: track.default || index === 0,
+      label: [
+        track.language ? track.language.toUpperCase() : 'Unknown',
+        track.title || null,
+        track.codec ? track.codec.toUpperCase() : null,
+      ].filter((part): part is string => Boolean(part)).join(' - '),
+    }));
+
+  const subtitleTracks = [
+    ...embedded.subtitles.map((track) => ({
+      id: `embedded-sub-${track.streamIndex}`,
+      source: 'embedded' as const,
+      streamIndex: track.streamIndex!,
+      fileName: null,
+      language: track.language,
+      title: track.title,
+      codec: track.codec,
+      default: track.default,
+      label: [
+        track.language ? track.language.toUpperCase() : 'Unknown',
+        track.title || null,
+        track.codec ? track.codec.toUpperCase() : null,
+      ].filter((part): part is string => Boolean(part)).join(' - '),
+    })),
+    ...externalSubtitleTracks.map((track) => ({
+      id: `external-sub-${track.fileName}`,
+      source: 'external' as const,
+      streamIndex: null,
+      fileName: track.fileName || null,
+      language: track.language,
+      title: track.title,
+      codec: track.codec,
+      default: false,
+      label: [
+        track.language ? track.language.toUpperCase() : 'Unknown',
+        track.fileName || null,
+      ].filter((part): part is string => Boolean(part)).join(' - '),
+    })),
+    ...onlineSubtitleTracks.map((track, index) => ({
+      id: `online-sub-${track.onlineToken || index}`,
+      source: 'online' as const,
+      streamIndex: null,
+      fileName: track.fileName || null,
+      onlineToken: track.onlineToken || null,
+      language: track.language,
+      title: track.title,
+      codec: null,
+      default: false,
+      label: [
+        track.language ? track.language.toUpperCase() : 'Unknown',
+        track.title || track.fileName || null,
+        'Online',
+      ].filter((part): part is string => Boolean(part)).join(' - '),
+    })),
+  ];
+
+  return c.json({
+    kind,
+    id,
+    hasCompatibilityStream: isMkvFile(filePath),
+    audioTracks,
+    subtitleTracks,
+  });
+});
+
+// Stream selected subtitle as WebVTT for video playback.
+mediaRoutes.get('/playback/subtitles/:kind/:id', async (c) => {
+  const kind = parseVideoKind(c.req.param('kind'));
+  const id = parseIdParam(c.req.param('id'));
+  if (!kind) return c.json({ error: 'Invalid video kind' }, 400);
+  if (id === null) return c.json({ error: 'Invalid media id' }, 400);
+
+  const source = c.req.query('source');
+  const streamRaw = c.req.query('stream');
+  const fileName = c.req.query('file');
+  const token = c.req.query('token');
+
+  const videoPath = await resolveVideoPlaybackFileByKind(kind, id);
+  if (!videoPath) return c.json({ error: 'No playable file found' }, 404);
+
+  const ffmpegBinary = await resolveFfmpegBinaryPath();
+  if (!ffmpegBinary) return c.json({ error: 'Subtitle conversion unavailable: ffmpeg is not configured.' }, 500);
+
+  const responseHeaders = new Headers({
+    'Cache-Control': 'no-store',
+    'Content-Type': 'text/vtt; charset=utf-8',
+    'X-Content-Type-Options': 'nosniff',
+  });
+
+  const makeVttResponseFromFfmpeg = (args: string[]): Response => {
+    const child = spawn(ffmpegBinary, args, {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const output = new PassThrough();
+    child.stdout?.pipe(output);
+    const webStream = Readable.toWeb(output) as ReadableStream;
+    return new Response(webStream, { status: 200, headers: responseHeaders });
+  };
+
+  if (source === 'embedded') {
+    const streamIndex = streamRaw ? Number.parseInt(streamRaw, 10) : NaN;
+    if (!Number.isInteger(streamIndex) || streamIndex < 0) {
+      return c.json({ error: 'Invalid subtitle stream index' }, 400);
+    }
+
+    return makeVttResponseFromFfmpeg([
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-nostdin',
+      '-i', videoPath,
+      '-map', `0:${streamIndex}`,
+      '-f', 'webvtt',
+      'pipe:1',
+    ]);
+  }
+
+  if (source === 'external') {
+    if (!fileName || fileName.trim().length === 0) {
+      return c.json({ error: 'Missing subtitle file name' }, 400);
+    }
+    const safeFileName = path.basename(fileName.trim());
+    const subtitlePath = path.join(path.dirname(videoPath), safeFileName);
+    if (!(await isExistingFile(subtitlePath))) {
+      return c.json({ error: 'Subtitle file not found' }, 404);
+    }
+    const extension = path.extname(subtitlePath).toLowerCase();
+    if (!SUBTITLE_FILE_EXTENSIONS.has(extension)) {
+      return c.json({ error: 'Unsupported subtitle format' }, 400);
+    }
+
+    if (extension === '.vtt') {
+      const subtitleStats = await stat(subtitlePath);
+      const headers = new Headers(responseHeaders);
+      headers.set('Content-Length', String(subtitleStats.size));
+      const nodeStream = createReadStream(subtitlePath);
+      const webStream = Readable.toWeb(nodeStream) as ReadableStream;
+      return new Response(webStream, { status: 200, headers });
+    }
+
+    return makeVttResponseFromFfmpeg([
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-nostdin',
+      '-i', subtitlePath,
+      '-f', 'webvtt',
+      'pipe:1',
+    ]);
+  }
+
+  if (source === 'online') {
+    if (!token || token.trim().length === 0) {
+      return c.json({ error: 'Missing online subtitle token' }, 400);
+    }
+    cleanupExpiredOnlineSubtitleTokens();
+    const tokenEntry = onlineSubtitleTokenStore.get(token.trim());
+    if (!tokenEntry || tokenEntry.expiresAt <= Date.now()) {
+      return c.json({ error: 'Online subtitle token expired or invalid' }, 404);
+    }
+
+    const remoteResponse = await fetch(tokenEntry.url, {
+      signal: AbortSignal.timeout(15000),
+      headers: { 'User-Agent': 'SoLaRi v1.0' },
+    });
+    if (!remoteResponse.ok) {
+      return c.json({ error: 'Failed to download online subtitles' }, 502);
+    }
+
+    const buffer = Buffer.from(await remoteResponse.arrayBuffer());
+    let textPayload = '';
+    const lowerFileName = (tokenEntry.fileName || '').toLowerCase();
+    const contentType = (remoteResponse.headers.get('content-type') || '').toLowerCase();
+
+    const isGzip = (
+      lowerFileName.endsWith('.gz')
+      || contentType.includes('gzip')
+      || (buffer.length > 2 && buffer[0] === 0x1f && buffer[1] === 0x8b)
+    );
+
+    try {
+      if (isGzip) {
+        textPayload = gunzipSync(buffer).toString('utf8');
+      } else {
+        textPayload = buffer.toString('utf8');
+      }
+    } catch {
+      textPayload = buffer.toString('utf8');
+    }
+
+    const vttPayload = ensureVttTextFromSubtitleText(textPayload);
+    return new Response(vttPayload, {
+      status: 200,
+      headers: responseHeaders,
+    });
+  }
+
+  return c.json({ error: 'Invalid subtitle source' }, 400);
 });
 
 // Stream movie playback
