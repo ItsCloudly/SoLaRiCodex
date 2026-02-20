@@ -1,5 +1,4 @@
 import { createAsync, useNavigate } from '@solidjs/router';
-import MainLayout from '~/components/layout/MainLayout';
 import { Card, Button, Badge } from '~/components/ui';
 import { Film, Plus, Search, Filter } from 'lucide-solid';
 import { fetchJson } from '~/lib/api';
@@ -16,14 +15,15 @@ export default function Movies() {
   const openMovieDetails = (movieId: number) => void navigate(`/movies/${movieId}`);
 
   return (
-    <MainLayout>
+    <>
+
       <div class="movies-page">
-        <header class="page-header">
+        <header class="cinematic-page-header">
           <div class="header-title">
             <Film size={28} class="header-icon" />
             <div>
-              <h1 class="section-title">Movies</h1>
-              <p class="header-subtitle">{movies().length} titles in library</p>
+              <h1 class="cinematic-title">Cinema</h1>
+              <p class="cinematic-subtitle">{movies().length} films in vault</p>
             </div>
           </div>
 
@@ -91,6 +91,7 @@ export default function Movies() {
           )}
         </div>
       </div>
-    </MainLayout>
+    </>
+
   );
 }

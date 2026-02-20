@@ -1,4 +1,3 @@
-import MainLayout from '~/components/layout/MainLayout';
 import { Card, CardHeader, CardTitle, Button, Input } from '~/components/ui';
 import { Settings, Server, HardDrive, Bell, Shield, Save } from 'lucide-solid';
 import { createSignal, onMount } from 'solid-js';
@@ -213,11 +212,17 @@ export default function SettingsPage() {
   };
 
   return (
-    <MainLayout>
+    <>
+
       <div class="settings-page">
-        <header class="page-header">
-          <Settings size={28} class="header-icon" />
-          <h1 class="section-title">Settings</h1>
+        <header class="cinematic-page-header">
+          <div class="header-title">
+            <Settings size={28} class="header-icon" />
+            <div>
+              <h1 class="cinematic-title">System Config</h1>
+              <p class="cinematic-subtitle">Core control center parameters</p>
+            </div>
+          </div>
         </header>
 
         {loading() && <p>Loading settings...</p>}
@@ -524,6 +529,7 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
-    </MainLayout>
+    </>
+
   );
 }

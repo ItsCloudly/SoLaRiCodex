@@ -1,7 +1,6 @@
 import { createAsync, useNavigate, useParams } from '@solidjs/router';
 import { createEffect, createSignal } from 'solid-js';
 import { Film, Calendar, Clock, Hash, Play, FolderOpen, Plus } from 'lucide-solid';
-import MainLayout from '~/components/layout/MainLayout';
 import { useMediaPlayer } from '~/components/player/MediaPlayerProvider';
 import { Badge, Button, Card, CardHeader, CardTitle, Input } from '~/components/ui';
 import { fetchJson, requestJson } from '~/lib/api';
@@ -384,13 +383,14 @@ export default function MovieDetailsPage() {
   };
 
   return (
-    <MainLayout>
+    <>
+
       <div class="movie-details-page">
-        <header class="movie-details-header">
+        <header class="cinematic-page-header">
           <button class="back-button" onClick={() => void navigate('/movies')}>
             {'<- Back to Movies'}
           </button>
-          <h1 class="section-title">Movie Details</h1>
+          <h1 class="cinematic-title" style={{ "font-size": "1.5rem", "margin-bottom": 0 }}>Dossier</h1>
         </header>
 
         {loadError() && (
@@ -665,6 +665,7 @@ export default function MovieDetailsPage() {
           </>
         )}
       </div>
-    </MainLayout>
+    </>
+
   );
 }

@@ -1,5 +1,4 @@
 import { createAsync, useNavigate } from '@solidjs/router';
-import MainLayout from '~/components/layout/MainLayout';
 import { Card, Button } from '~/components/ui';
 import { Music, Plus, Search, Filter, Disc } from 'lucide-solid';
 import { fetchJson } from '~/lib/api';
@@ -15,14 +14,15 @@ export default function MusicPage() {
   const openMusicSearch = () => void navigate('/search?category=music');
 
   return (
-    <MainLayout>
+    <>
+
       <div class="music-page">
-        <header class="page-header">
+        <header class="cinematic-page-header">
           <div class="header-title">
             <Music size={28} class="header-icon" />
             <div>
-              <h1 class="section-title">Music</h1>
-              <p class="header-subtitle">{artists().length} artists in library</p>
+              <h1 class="cinematic-title">Aural</h1>
+              <p class="cinematic-subtitle">{artists().length} artists in vault</p>
             </div>
           </div>
 
@@ -87,6 +87,7 @@ export default function MusicPage() {
           )}
         </div>
       </div>
-    </MainLayout>
+    </>
+
   );
 }

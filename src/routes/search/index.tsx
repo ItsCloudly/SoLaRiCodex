@@ -1,4 +1,3 @@
-import MainLayout from '~/components/layout/MainLayout';
 import { Card, Button, Input, Badge } from '~/components/ui';
 import { Search, Film, Tv, Music, ArrowRight, Check } from 'lucide-solid';
 import { createSignal } from 'solid-js';
@@ -530,11 +529,17 @@ export default function SearchPage() {
   };
 
   return (
-    <MainLayout>
+    <>
+
       <div class="search-page">
-        <header class="page-header">
-          <Search size={28} class="header-icon" />
-          <h1 class="section-title">Search</h1>
+        <header class="cinematic-page-header">
+          <div class="header-title">
+            <Search size={28} class="header-icon" />
+            <div>
+              <h1 class="cinematic-title">Nexus Discovery</h1>
+              <p class="cinematic-subtitle">Search indexers and libraries</p>
+            </div>
+          </div>
         </header>
 
         {errorMessage() && (
@@ -859,6 +864,7 @@ export default function SearchPage() {
           </div>
         )}
       </div>
-    </MainLayout>
+    </>
+
   );
 }

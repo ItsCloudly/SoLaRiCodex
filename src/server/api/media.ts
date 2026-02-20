@@ -624,10 +624,10 @@ async function collectSeriesEpisodeFileMatches(
 
     const episodeMarkers = parseEpisodeMarkersFromFileName(scannedFile.fileName);
     for (const marker of episodeMarkers) {
-        const key = `${marker.season}:${marker.episode}`;
-        if (!matches.has(key)) {
-          matches.set(key, scannedFile.fullPath);
-        }
+      const key = `${marker.season}:${marker.episode}`;
+      if (!matches.has(key)) {
+        matches.set(key, scannedFile.fullPath);
+      }
     }
   }
 
@@ -2686,13 +2686,13 @@ async function findPlayableFileInDirectory(
 
   const exactHintMatch = directFiles.find((candidatePath) => (
     normalizedTitleHint.length > 0
-      && (
-        normalizeTitleForMatch(path.basename(candidatePath)).includes(normalizedTitleHint)
-        || normalizedContainsAllTokens(
-          normalizeTitleForMatch(path.basename(candidatePath)),
-          normalizedTitleHint,
-        )
+    && (
+      normalizeTitleForMatch(path.basename(candidatePath)).includes(normalizedTitleHint)
+      || normalizedContainsAllTokens(
+        normalizeTitleForMatch(path.basename(candidatePath)),
+        normalizedTitleHint,
       )
+    )
   ));
   if (exactHintMatch) return exactHintMatch;
 
@@ -3280,6 +3280,31 @@ mediaRoutes.get('/music/artists', async (c) => {
     .from(artists)
     .innerJoin(media, eq(artists.mediaId, media.id))
     .orderBy(media.title);
+
+  return c.json(results);
+});
+
+// Add artist
+// Get all albums
+mediaRoutes.get('/music/albums', async (c) => {
+  try {
+    await syncMusicFromFilesystem();
+  } catch {
+    // Filesystem sync should never block album listing responses.
+  }
+
+  const results = await db
+    .select({
+      id: media.id,
+      title: media.title,
+      posterPath: media.posterPath,
+      releaseDate: albums.releaseDate,
+      status: albums.status,
+      path: albums.path,
+    })
+    .from(albums)
+    .innerJoin(media, eq(albums.mediaId, media.id))
+    .orderBy(desc(albums.releaseDate));
 
   return c.json(results);
 });

@@ -1,4 +1,3 @@
-import MainLayout from '~/components/layout/MainLayout';
 import { MediaPlayerPanel, useMediaPlayer } from '~/components/player/MediaPlayerProvider';
 import { Card } from '~/components/ui';
 
@@ -6,10 +5,14 @@ export default function PlayerPage() {
   const mediaPlayer = useMediaPlayer();
 
   return (
-    <MainLayout>
+    <>
+
       <div class="player-page">
-        <header class="movie-details-header">
-          <h1 class="section-title">Player</h1>
+        <header class="cinematic-page-header">
+          <div class="header-title">
+            <h1 class="cinematic-title">Nexus Player</h1>
+            <p class="cinematic-subtitle">Media playback and controls</p>
+          </div>
         </header>
 
         {mediaPlayer.currentItem() ? (
@@ -21,6 +24,7 @@ export default function PlayerPage() {
           </Card>
         )}
       </div>
-    </MainLayout>
+    </>
+
   );
 }

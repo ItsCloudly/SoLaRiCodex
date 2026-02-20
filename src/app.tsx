@@ -7,6 +7,8 @@ import '~/styles/global.css';
 import '~/styles/components.css';
 import '~/styles/player.css';
 
+import MainLayout from '~/components/layout/MainLayout';
+
 export default function App() {
   return (
     <Router
@@ -41,7 +43,9 @@ export default function App() {
               </div>
             )}
           >
-            <Suspense>{props.children}</Suspense>
+            <MainLayout>
+              <Suspense>{props.children}</Suspense>
+            </MainLayout>
           </ErrorBoundary>
         </MediaPlayerProvider>
       )}

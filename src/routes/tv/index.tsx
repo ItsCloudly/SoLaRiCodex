@@ -1,5 +1,4 @@
 import { createAsync, useNavigate } from '@solidjs/router';
-import MainLayout from '~/components/layout/MainLayout';
 import { Card, Button, Badge } from '~/components/ui';
 import { Tv, Plus, Search, Filter } from 'lucide-solid';
 import { fetchJson } from '~/lib/api';
@@ -16,14 +15,15 @@ export default function TVShows() {
   const openTvDetails = (seriesId: number) => void navigate(`/tv/${seriesId}`);
 
   return (
-    <MainLayout>
+    <>
+
       <div class="tv-page">
-        <header class="page-header">
+        <header class="cinematic-page-header">
           <div class="header-title">
             <Tv size={28} class="header-icon" />
             <div>
-              <h1 class="section-title">TV Shows</h1>
-              <p class="header-subtitle">{series().length} series in library</p>
+              <h1 class="cinematic-title">Series</h1>
+              <p class="cinematic-subtitle">{series().length} series in vault</p>
             </div>
           </div>
 
@@ -91,6 +91,7 @@ export default function TVShows() {
           )}
         </div>
       </div>
-    </MainLayout>
+    </>
+
   );
 }

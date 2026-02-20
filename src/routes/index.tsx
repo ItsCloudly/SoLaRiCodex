@@ -1,8 +1,7 @@
 import { createAsync, useNavigate } from '@solidjs/router';
 import { createMemo, createSignal } from 'solid-js';
-import MainLayout from '~/components/layout/MainLayout';
 import { Badge, Button, Card, CardHeader, CardTitle } from '~/components/ui';
-import { Activity, Download, Film, Music, Search, Tv } from 'lucide-solid';
+import { Activity, Download, Film, Music, Search, Tv, Database, Zap, HardDrive } from 'lucide-solid';
 import { fetchJson } from '~/lib/api';
 import type { Stats } from '~/types';
 
@@ -20,9 +19,9 @@ export default function Dashboard() {
   const health = () => healthResult()?.data;
 
   const apiStatus = () => {
-    if (healthResult()?.error) return 'error';
-    if (health()?.status === 'ok') return 'connected';
-    return 'loading';
+    if (healthResult()?.error) return 'Offline';
+    if (health()?.status === 'ok') return 'Online';
+    return 'Connecting...';
   };
 
   const statusCounts = createMemo(() => {
@@ -49,163 +48,168 @@ export default function Dashboard() {
   };
 
   return (
-    <MainLayout>
-      <div class="dashboard">
-        <header class="dashboard-header">
-          <h1 class="section-title">System Overview</h1>
+    <>
+
+      <div class="cinematic-dashboard">
+        <header class="cinematic-page-header">
+          <div>
+            <h1 class="cinematic-title">Command Center</h1>
+            <p class="cinematic-subtitle">Your media empire, at a glance.</p>
+          </div>
           <div class="header-actions">
             <button
               type="button"
-              class="timestamp api-status-toggle"
+              class="api-status-toggle"
               onClick={() => setShowApiResponse((current) => !current)}
               aria-expanded={showApiResponse()}
             >
-              API Status: {apiStatus()} {showApiResponse() ? '(hide)' : '(click for details)'}
+              <Database size={14} class="header-icon" />
+              Nexus {apiStatus()} {showApiResponse() ? '[-]' : '[+]'}
             </button>
           </div>
         </header>
 
         {statsError() && (
-          <Card>
+          <Card class="mb-4">
             <CardHeader>
-              <CardTitle>Stats Error</CardTitle>
+              <CardTitle>System Error</CardTitle>
             </CardHeader>
-            <p>{statsError()}</p>
+            <p class="text-error">{statsError()}</p>
           </Card>
         )}
 
         {showApiResponse() && health() && (
-          <Card>
+          <Card class="mb-4">
             <CardHeader>
-              <CardTitle>API Response</CardTitle>
+              <CardTitle>Telemetry Data</CardTitle>
             </CardHeader>
-            <pre>{JSON.stringify(health(), null, 2)}</pre>
+            <pre style={{ "background": "rgba(0,0,0,0.5)", "color": "var(--accent-primary)", "padding": "1rem", "border": "1px solid var(--border-primary)", "border-radius": "8px" }}>
+              {JSON.stringify(health(), null, 2)}
+            </pre>
           </Card>
         )}
 
-        <div class="stats-grid">
-          <Card class="stat-card">
-            <div class="stat-icon movies">
-              <Film size={24} />
+        <div class="bento-grid">
+          {/* Main Total Stat (2x1) */}
+          <div class="bento-card span-2">
+            <div class="bento-header">
+              <HardDrive size={20} class="bento-icon" />
+              <span class="bento-header-title">Nexus Vault</span>
             </div>
-            <div class="stat-content">
-              <div class="stat-value">{stats()?.library?.movies ?? 0}</div>
-              <div class="stat-label">Movies</div>
-            </div>
-          </Card>
+            <div class="bento-stat-large">{totalLibraryItems()}</div>
+            <div class="bento-stat-label">Total Assimilated Assets</div>
+          </div>
 
-          <Card class="stat-card">
-            <div class="stat-icon tv">
-              <Tv size={24} />
+          {/* Individual MediaType Stats */}
+          <div class="bento-card">
+            <div class="bento-header">
+              <Film size={20} class="bento-icon" />
+              <span class="bento-header-title">Cinema</span>
             </div>
-            <div class="stat-content">
-              <div class="stat-value">{stats()?.library?.tv ?? 0}</div>
-              <div class="stat-label">TV Series</div>
-            </div>
-          </Card>
+            <div class="bento-stat-large">{stats()?.library?.movies ?? 0}</div>
+            <div class="bento-stat-label">Films</div>
+          </div>
 
-          <Card class="stat-card">
-            <div class="stat-icon music">
-              <Music size={24} />
+          <div class="bento-card">
+            <div class="bento-header">
+              <Tv size={20} class="bento-icon" />
+              <span class="bento-header-title">Series</span>
             </div>
-            <div class="stat-content">
-              <div class="stat-value">{stats()?.library?.music ?? 0}</div>
-              <div class="stat-label">Albums</div>
-            </div>
-          </Card>
+            <div class="bento-stat-large">{stats()?.library?.tv ?? 0}</div>
+            <div class="bento-stat-label">Shows</div>
+          </div>
 
-          <Card class="stat-card">
-            <div class="stat-icon downloads">
-              <Download size={24} />
+          <div class="bento-card">
+            <div class="bento-header">
+              <Music size={20} class="bento-icon" />
+              <span class="bento-header-title">Audio</span>
             </div>
-            <div class="stat-content">
-              <div class="stat-value">{activeDownloads().length}</div>
-              <div class="stat-label">Active Downloads</div>
-            </div>
-          </Card>
+            <div class="bento-stat-large">{stats()?.library?.music ?? 0}</div>
+            <div class="bento-stat-label">Albums</div>
+          </div>
 
-          <Card class="stat-card stat-card-total">
-            <div class="stat-icon">
-              <Activity size={24} />
+          <div class="bento-card">
+            <div class="bento-header">
+              <Download size={20} class="bento-icon" />
+              <span class="bento-header-title">Queue</span>
             </div>
-            <div class="stat-content">
-              <div class="stat-value">{totalLibraryItems()}</div>
-              <div class="stat-label">Total Library Items</div>
-            </div>
-          </Card>
-        </div>
+            <div class="bento-stat-large">{activeDownloads().length}</div>
+            <div class="bento-stat-label">Active Transfers</div>
+          </div>
 
-        <div class="dashboard-main-grid">
-          <Card class="dashboard-panel">
-            <CardHeader>
-              <CardTitle>Library Mix</CardTitle>
-            </CardHeader>
-            <div class="library-mix-list">
-              <div class="library-mix-row">
-                <span>Movies</span>
+          {/* Library Composition (2x2) */}
+          <div class="bento-card span-2 row-2">
+            <div class="bento-header">
+              <Activity size={20} class="bento-icon" />
+              <span class="bento-header-title">Vault Composition</span>
+            </div>
+
+            <div class="library-metrics">
+              <div class="cinematic-mix-row">
+                <span>Cinematic</span>
                 <span>{stats()?.library?.movies ?? 0} ({shareOfLibrary(stats()?.library?.movies ?? 0)}%)</span>
               </div>
-              <div class="library-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library?.movies ?? 0)}%` }} /></div>
-              <div class="library-mix-row">
-                <span>TV Series</span>
+              <div class="cinematic-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library?.movies ?? 0)}%` }} /></div>
+
+              <div class="cinematic-mix-row">
+                <span>Episodic</span>
                 <span>{stats()?.library?.tv ?? 0} ({shareOfLibrary(stats()?.library?.tv ?? 0)}%)</span>
               </div>
-              <div class="library-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library?.tv ?? 0)}%` }} /></div>
-              <div class="library-mix-row">
-                <span>Albums</span>
+              <div class="cinematic-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library?.tv ?? 0)}%` }} /></div>
+
+              <div class="cinematic-mix-row">
+                <span>Aural</span>
                 <span>{stats()?.library?.music ?? 0} ({shareOfLibrary(stats()?.library?.music ?? 0)}%)</span>
               </div>
-              <div class="library-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library?.music ?? 0)}%` }} /></div>
-            </div>
-          </Card>
-
-          <Card class="dashboard-panel">
-            <CardHeader>
-              <CardTitle>Download Pulse</CardTitle>
-            </CardHeader>
-            <div class="dashboard-status-chips">
-              <Badge variant="info">Queued: {statusCounts().queued}</Badge>
-              <Badge variant="info">Downloading: {statusCounts().downloading}</Badge>
-              <Badge variant="warning">Paused: {statusCounts().paused}</Badge>
-              <Badge variant="success">Completed: {statusCounts().completed}</Badge>
-              <Badge variant="error">Failed: {statusCounts().failed}</Badge>
+              <div class="cinematic-mix-bar"><span style={{ width: `${shareOfLibrary(stats()?.library?.music ?? 0)}%` }} /></div>
             </div>
 
-            <div class="overview-active-list">
+            <div class="bento-actions mt-auto">
+              <Button class="btn-primary" onClick={() => void navigate('/search')}>
+                <Search size={16} /> Locate Media
+              </Button>
+            </div>
+          </div>
+
+          {/* Download Pulse (2x2) */}
+          <div class="bento-card span-2 row-2">
+            <div class="bento-header">
+              <Zap size={20} class="bento-icon" />
+              <span class="bento-header-title">Transfer Pulse</span>
+            </div>
+
+            <div class="cinematic-status-pills">
+              <Badge variant="info">Q: {statusCounts().queued}</Badge>
+              <Badge variant="info">DL: {statusCounts().downloading}</Badge>
+              <Badge variant="warning">PAUSED: {statusCounts().paused}</Badge>
+              <Badge variant="success">DONE: {statusCounts().completed}</Badge>
+              {statusCounts().failed > 0 && <Badge variant="error">ERR: {statusCounts().failed}</Badge>}
+            </div>
+
+            <div class="pulse-list">
               {activeDownloads().length === 0 ? (
-                <p class="header-subtitle">No active downloads right now.</p>
+                <div class="empty-state" style={{ "padding": "2rem 0" }}>
+                  <p>All frequencies quiet. No active transfers.</p>
+                </div>
               ) : (
-                activeDownloads().slice(0, 6).map((download) => (
-                  <div class="overview-active-item">
-                    <span>{download.title}</span>
-                    <span>{download.status}</span>
+                activeDownloads().slice(0, 4).map((download) => (
+                  <div class="pulse-item">
+                    <span class="pulse-item-title">{download.title}</span>
+                    <span class="pulse-item-status">{download.status}</span>
                   </div>
                 ))
               )}
             </div>
-          </Card>
 
-          <Card class="dashboard-panel dashboard-actions-panel">
-            <CardHeader>
-              <CardTitle>Quick Actions</CardTitle>
-            </CardHeader>
-            <div class="dashboard-actions-grid">
-              <Button variant="secondary" onClick={() => void navigate('/search')}>
-                <Search size={16} />
-                Discover Media
-              </Button>
+            <div class="bento-actions mt-auto">
               <Button variant="secondary" onClick={() => void navigate('/activity')}>
-                <Download size={16} />
-                Open Activity
-              </Button>
-              <Button variant="secondary" onClick={() => void navigate('/player')}>
-                <Music size={16} />
-                Open Player
+                <Activity size={16} /> System Logs
               </Button>
             </div>
-          </Card>
+          </div>
         </div>
       </div>
-    </MainLayout>
+    </>
+
   );
 }

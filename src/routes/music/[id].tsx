@@ -1,7 +1,6 @@
 import { createAsync, useNavigate, useParams } from '@solidjs/router';
 import { createEffect, createSignal } from 'solid-js';
 import { Calendar, Disc, Hash, Music, Play, FolderOpen, Plus } from 'lucide-solid';
-import MainLayout from '~/components/layout/MainLayout';
 import { useMediaPlayer } from '~/components/player/MediaPlayerProvider';
 import { Badge, Button, Card, CardHeader, CardTitle, Input } from '~/components/ui';
 import { fetchJson, requestJson } from '~/lib/api';
@@ -679,13 +678,14 @@ export default function ArtistDetailsPage() {
   };
 
   return (
-    <MainLayout>
+    <>
+
       <div class="movie-details-page">
-        <header class="movie-details-header">
+        <header class="cinematic-page-header">
           <button class="back-button" onClick={() => void navigate('/music')}>
             {'<- Back to Music'}
           </button>
-          <h1 class="section-title">Artist Details</h1>
+          <h1 class="cinematic-title" style={{ "font-size": "1.5rem", "margin-bottom": 0 }}>Dossier</h1>
         </header>
 
         {loadError() && (
@@ -908,72 +908,72 @@ export default function ArtistDetailsPage() {
                             {searchResultsContext() === 'record'
                               && activeRecordSearchId() === group.id
                               && expandedRecordId() === group.id && (
-                              <div class="record-search-results" id={`record-results-${group.id}`}>
-                                {searchingReleases() && (
-                                  <p class="jackett-empty">Searching indexers for this record...</p>
-                                )}
+                                <div class="record-search-results" id={`record-results-${group.id}`}>
+                                  {searchingReleases() && (
+                                    <p class="jackett-empty">Searching indexers for this record...</p>
+                                  )}
 
-                                {!searchingReleases() && jackettError() && (
-                                  <p class="inline-feedback error">{jackettError()}</p>
-                                )}
+                                  {!searchingReleases() && jackettError() && (
+                                    <p class="inline-feedback error">{jackettError()}</p>
+                                  )}
 
-                                {!searchingReleases() && jackettMessage() && (
-                                  <p class="inline-feedback success">{jackettMessage()}</p>
-                                )}
+                                  {!searchingReleases() && jackettMessage() && (
+                                    <p class="inline-feedback success">{jackettMessage()}</p>
+                                  )}
 
-                                {!searchingReleases() && jackettResults().length > 0 && (
-                                  <div class="jackett-results-list">
-                                    {jackettResults().map((release) => (
-                                      <Card class="jackett-release-card" key={release.id}>
-                                        <div class="jackett-release-main">
-                                          <h4 class="jackett-release-title">{release.title}</h4>
-                                          <p class="jackett-release-meta">
-                                            <span>{release.indexerName}</span>
-                                            <span>Seeders: {release.seeders ?? 'n/a'}</span>
-                                            <span>Size: {formatSize(release.size)}</span>
-                                            <span>Published: {formatPublishDate(release.publishDate)}</span>
-                                          </p>
-                                          {release.categories.length > 0 && (
-                                            <p class="jackett-release-categories">{release.categories.join(', ')}</p>
-                                          )}
-                                        </div>
-                                        <div class="jackett-release-actions">
-                                          <Button
-                                            variant="secondary"
-                                            size="sm"
-                                            onClick={() => void sendReleaseToDeluge(release)}
-                                            disabled={!release.downloadUrl || sendingToDelugeId() === release.id}
-                                          >
-                                            {sendingToDelugeId() === release.id ? 'Sending...' : 'Send to Deluge'}
-                                          </Button>
-                                          {release.downloadUrl && (
-                                            <a href={release.downloadUrl} target="_blank" rel="noreferrer">
-                                              Open
-                                            </a>
-                                          )}
-                                          {release.infoUrl && (
-                                            <a href={release.infoUrl} target="_blank" rel="noreferrer">
-                                              Details
-                                            </a>
-                                          )}
-                                        </div>
-                                      </Card>
-                                    ))}
-                                  </div>
-                                )}
+                                  {!searchingReleases() && jackettResults().length > 0 && (
+                                    <div class="jackett-results-list">
+                                      {jackettResults().map((release) => (
+                                        <Card class="jackett-release-card" key={release.id}>
+                                          <div class="jackett-release-main">
+                                            <h4 class="jackett-release-title">{release.title}</h4>
+                                            <p class="jackett-release-meta">
+                                              <span>{release.indexerName}</span>
+                                              <span>Seeders: {release.seeders ?? 'n/a'}</span>
+                                              <span>Size: {formatSize(release.size)}</span>
+                                              <span>Published: {formatPublishDate(release.publishDate)}</span>
+                                            </p>
+                                            {release.categories.length > 0 && (
+                                              <p class="jackett-release-categories">{release.categories.join(', ')}</p>
+                                            )}
+                                          </div>
+                                          <div class="jackett-release-actions">
+                                            <Button
+                                              variant="secondary"
+                                              size="sm"
+                                              onClick={() => void sendReleaseToDeluge(release)}
+                                              disabled={!release.downloadUrl || sendingToDelugeId() === release.id}
+                                            >
+                                              {sendingToDelugeId() === release.id ? 'Sending...' : 'Send to Deluge'}
+                                            </Button>
+                                            {release.downloadUrl && (
+                                              <a href={release.downloadUrl} target="_blank" rel="noreferrer">
+                                                Open
+                                              </a>
+                                            )}
+                                            {release.infoUrl && (
+                                              <a href={release.infoUrl} target="_blank" rel="noreferrer">
+                                                Details
+                                              </a>
+                                            )}
+                                          </div>
+                                        </Card>
+                                      ))}
+                                    </div>
+                                  )}
 
-                                {!searchingReleases() && jackettFailures().length > 0 && (
-                                  <div class="jackett-failures">
-                                    <p class="inline-feedback error">Indexer errors:</p>
-                                    {jackettFailures().map((failure) => (
-                                      <p class="jackett-failure-line">
-                                        {failure.indexerName}: {failure.message}
-                                      </p>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                                  {!searchingReleases() && jackettFailures().length > 0 && (
+                                    <div class="jackett-failures">
+                                      <p class="inline-feedback error">Indexer errors:</p>
+                                      {jackettFailures().map((failure) => (
+                                        <p class="jackett-failure-line">
+                                          {failure.indexerName}: {failure.message}
+                                        </p>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                           </Card>
                         ))}
                       </div>
@@ -1164,7 +1164,8 @@ export default function ArtistDetailsPage() {
           </>
         )}
       </div>
-    </MainLayout>
+    </>
+
   );
 }
 

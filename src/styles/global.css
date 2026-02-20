@@ -4,39 +4,47 @@
    ============================================================= */
 
 /* ── Font Import ─────────────────────────────────────────────── */
-@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:wght@400;500;600&display=swap");
 
-/* ── Light Mode Tokens (Default) ─────────────────────────────── */
+/* ── Light Mode Tokens (Overridden to Cinematic Dark) ───────── */
 :root {
-    --bg-primary: #fafafa;
-    --bg-secondary: #ffffff;
-    --bg-tertiary: #f5f5f7;
-    --bg-elevated: #ffffff;
+    --bg-primary: #008080;
+    /* Classic Win95 Teal desktop */
+    --bg-secondary: #c0c0c0;
+    /* Standard Win95 gray */
+    --bg-tertiary: #ffffff;
+    /* White for inputs */
+    --bg-elevated: #dfdfdf;
+    /* Lighter gray */
 
-    --accent-primary: #5856d6;
-    --accent-primary-dim: #4a48c4;
-    --accent-primary-glow: rgba(88, 86, 214, 0.15);
+    --accent-primary: #000080;
+    /* Classic dark blue title bar */
+    --accent-primary-dim: #1084d0;
+    --accent-primary-glow: transparent;
 
-    --accent-secondary: #32ade6;
-    --accent-secondary-dim: #2a9fd4;
-    --accent-secondary-glow: rgba(50, 173, 230, 0.12);
+    --accent-secondary: #808080;
+    /* Dark gray for disabled/borders */
+    --accent-secondary-dim: #404040;
+    --accent-secondary-glow: transparent;
 
-    --success: #34c759;
-    --warning: #ff9f0a;
-    --error: #ff3b30;
-    --info: #5ac8fa;
+    --success: #008000;
+    --warning: #ffff00;
+    --error: #ff0000;
+    --info: #0000ff;
 
-    --text-primary: #1d1d1f;
-    --text-secondary: #6e6e73;
-    --text-muted: #aeaeb2;
-    --text-accent: #5856d6;
+    --text-primary: #000000;
+    /* Black text */
+    --text-secondary: #222222;
+    --text-muted: #808080;
+    --text-accent: #ffffff;
+    /* White text on blue bars */
 
-    --border-primary: rgba(0, 0, 0, 0.08);
-    --border-accent: rgba(88, 86, 214, 0.35);
-    --border-dim: rgba(0, 0, 0, 0.04);
+    --border-primary: #808080;
+    --border-accent: #ffffff;
+    --border-dim: #dfdfdf;
 
-    --font-display: "Outfit", -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-body: "Outfit", -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-display: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+    --font-body: "DM Sans", sans-serif;
     --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
 
     --space-xs: 0.25rem;
@@ -47,102 +55,137 @@
     --space-2xl: 3rem;
     --space-3xl: 4rem;
 
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
-    --radius-xl: 20px;
+    /* Retro Blocky Edges */
+    --radius-sm: 0px;
+    --radius-md: 0px;
+    --radius-lg: 0px;
+    --radius-xl: 0px;
     --radius-full: 9999px;
 
-    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05), 0 1px 4px rgba(0, 0, 0, 0.03);
-    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.03);
-    --shadow-xl:
-        0 16px 48px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04);
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.7), 0 1px 4px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.8), 0 2px 8px rgba(0, 0, 0, 0.6);
+    --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.9), 0 4px 16px rgba(0, 0, 0, 0.7);
     --shadow-glow: 0 0 24px var(--accent-primary-glow);
     --shadow-glow-cyan: 0 0 24px var(--accent-secondary-glow);
     --shadow-card: var(--shadow-md);
 
-    --glass-bg: rgba(255, 255, 255, 0.72);
-    --glass-bg-heavy: rgba(255, 255, 255, 0.88);
-    --glass-border: rgba(255, 255, 255, 0.6);
-    --glass-blur: blur(20px) saturate(180%);
-    --glass-blur-heavy: blur(40px) saturate(200%);
+    --glass-bg: rgba(5, 5, 5, 0.7);
+    --glass-bg-heavy: rgba(5, 5, 5, 0.9);
+    --glass-border: rgba(255, 255, 255, 0.05);
+    --glass-blur: blur(24px) saturate(150%);
+    --glass-blur-heavy: blur(48px) saturate(200%);
 
-    --transition-fast: 150ms cubic-bezier(0.25, 0.1, 0.25, 1);
-    --transition-medium: 300ms cubic-bezier(0.25, 0.1, 0.25, 1);
-    --transition-slow: 500ms cubic-bezier(0.25, 0.1, 0.25, 1);
-    --transition-theme: 400ms cubic-bezier(0.25, 0.1, 0.25, 1);
-    --transition-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    --transition-fast: 200ms cubic-bezier(0.2, 0, 0, 1);
+    --transition-medium: 400ms cubic-bezier(0.2, 0, 0, 1);
+    --transition-slow: 600ms cubic-bezier(0.2, 0, 0, 1);
+    --transition-theme: 500ms cubic-bezier(0.2, 0, 0, 1);
+    --transition-spring: 600ms cubic-bezier(0.2, 0.8, 0.2, 1);
 
-    --bg-gradient-start: #fafafa;
-    --bg-gradient-mid: #f5f5f7;
-    --bg-gradient-end: #f0f0f2;
-    --bg-orb-primary: rgba(88, 86, 214, 0.05);
-    --bg-orb-secondary: rgba(50, 173, 230, 0.04);
+    --bg-gradient-start: #030303;
+    --bg-gradient-mid: #0a0a0a;
+    --bg-gradient-end: #121212;
+    --bg-orb-primary: rgba(212, 175, 55, 0.03);
+    --bg-orb-secondary: rgba(153, 0, 0, 0.03);
     --grid-line-color: transparent;
 
-    --link-hover: #4a48c4;
-    --scrollbar-track: rgba(0, 0, 0, 0.03);
-    --scrollbar-thumb: rgba(0, 0, 0, 0.12);
-    --scrollbar-thumb-hover: rgba(0, 0, 0, 0.22);
+    --link-hover: #E8C547;
+    --scrollbar-track: rgba(255, 255, 255, 0.02);
+    --scrollbar-thumb: rgba(255, 255, 255, 0.08);
+    --scrollbar-thumb-hover: rgba(255, 255, 255, 0.15);
 
-    color-scheme: light;
+    color-scheme: dark;
 }
 
 /* ── Dark Mode Tokens ────────────────────────────────────────── */
 html[data-theme="dark"] {
-    --bg-primary: #000000;
-    --bg-secondary: #0d0d0d;
-    --bg-tertiary: #1c1c1e;
-    --bg-elevated: #2c2c2e;
+    --bg-primary: #008080;
+    /* Classic Win95 Teal desktop */
+    --bg-secondary: #c0c0c0;
+    /* Standard Win95 gray */
+    --bg-tertiary: #ffffff;
+    /* White for inputs */
+    --bg-elevated: #dfdfdf;
+    /* Lighter gray */
 
-    --accent-primary: #7b79e7;
-    --accent-primary-dim: #6e6cd9;
-    --accent-primary-glow: rgba(123, 121, 231, 0.2);
+    --accent-primary: #000080;
+    /* Classic dark blue title bar */
+    --accent-primary-dim: #1084d0;
+    --accent-primary-glow: transparent;
 
-    --accent-secondary: #5ac8fa;
-    --accent-secondary-dim: #4ab8ea;
-    --accent-secondary-glow: rgba(90, 200, 250, 0.15);
+    --accent-secondary: #808080;
+    /* Dark gray for disabled/borders */
+    --accent-secondary-dim: #404040;
+    --accent-secondary-glow: transparent;
 
-    --success: #30d158;
-    --warning: #ffd60a;
-    --error: #ff453a;
-    --info: #64d2ff;
+    --success: #008000;
+    --warning: #ffff00;
+    --error: #ff0000;
+    --info: #0000ff;
 
-    --text-primary: #f5f5f7;
-    --text-secondary: #a1a1a6;
-    --text-muted: #636366;
-    --text-accent: #9b99f5;
+    --text-primary: #000000;
+    /* Black text */
+    --text-secondary: #222222;
+    --text-muted: #808080;
+    --text-accent: #ffffff;
+    /* White text on blue bars */
 
-    --border-primary: rgba(255, 255, 255, 0.08);
-    --border-accent: rgba(123, 121, 231, 0.35);
-    --border-dim: rgba(255, 255, 255, 0.04);
+    --border-primary: #808080;
+    --border-accent: #ffffff;
+    --border-dim: #dfdfdf;
 
-    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.15);
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.12);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.25), 0 1px 4px rgba(0, 0, 0, 0.15);
-    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
-    --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.25);
+    --font-display: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+    --font-body: "DM Sans", sans-serif;
+    --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 1rem;
+    --space-lg: 1.5rem;
+    --space-xl: 2rem;
+    --space-2xl: 3rem;
+    --space-3xl: 4rem;
+
+    /* Retro Blocky Edges */
+    --radius-sm: 0px;
+    --radius-md: 0px;
+    --radius-lg: 0px;
+    --radius-xl: 0px;
+    --radius-full: 9999px;
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.7), 0 1px 4px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.8), 0 2px 8px rgba(0, 0, 0, 0.6);
+    --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.9), 0 4px 16px rgba(0, 0, 0, 0.7);
+    --shadow-glow: 0 0 24px var(--accent-primary-glow);
+    --shadow-glow-cyan: 0 0 24px var(--accent-secondary-glow);
     --shadow-card: var(--shadow-md);
 
-    --glass-bg: rgba(28, 28, 30, 0.72);
-    --glass-bg-heavy: rgba(28, 28, 30, 0.88);
-    --glass-border: rgba(255, 255, 255, 0.06);
-    --glass-blur: blur(20px) saturate(180%);
-    --glass-blur-heavy: blur(40px) saturate(200%);
+    --glass-bg: rgba(5, 5, 5, 0.7);
+    --glass-bg-heavy: rgba(5, 5, 5, 0.9);
+    --glass-border: rgba(255, 255, 255, 0.05);
+    --glass-blur: blur(24px) saturate(150%);
+    --glass-blur-heavy: blur(48px) saturate(200%);
 
-    --bg-gradient-start: #000000;
-    --bg-gradient-mid: #050508;
-    --bg-gradient-end: #0a0a0f;
-    --bg-orb-primary: rgba(123, 121, 231, 0.06);
-    --bg-orb-secondary: rgba(90, 200, 250, 0.04);
+    --transition-fast: 200ms cubic-bezier(0.2, 0, 0, 1);
+    --transition-medium: 400ms cubic-bezier(0.2, 0, 0, 1);
+    --transition-slow: 600ms cubic-bezier(0.2, 0, 0, 1);
+    --transition-theme: 500ms cubic-bezier(0.2, 0, 0, 1);
+    --transition-spring: 600ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+    --bg-gradient-start: #030303;
+    --bg-gradient-mid: #0a0a0a;
+    --bg-gradient-end: #121212;
+    --bg-orb-primary: rgba(212, 175, 55, 0.03);
+    --bg-orb-secondary: rgba(153, 0, 0, 0.03);
     --grid-line-color: transparent;
 
-    --link-hover: #9b99f5;
-    --scrollbar-track: rgba(255, 255, 255, 0.03);
-    --scrollbar-thumb: rgba(255, 255, 255, 0.1);
-    --scrollbar-thumb-hover: rgba(255, 255, 255, 0.18);
+    --link-hover: #E8C547;
+    --scrollbar-track: rgba(255, 255, 255, 0.02);
+    --scrollbar-thumb: rgba(255, 255, 255, 0.08);
+    --scrollbar-thumb-hover: rgba(255, 255, 255, 0.15);
 
     color-scheme: dark;
 }
@@ -165,7 +208,7 @@ html {
 
 body {
     font-family: var(--font-body);
-    background: var(--bg-primary);
+    background: transparent;
     color: var(--text-primary);
     line-height: 1.6;
     min-height: 100vh;
@@ -183,22 +226,16 @@ body::before {
     pointer-events: none;
     z-index: -1;
     background:
-        radial-gradient(
-            1200px 500px at 10% 0%,
+        radial-gradient(1200px 500px at 10% 0%,
             var(--bg-orb-primary),
-            transparent 70%
-        ),
-        radial-gradient(
-            900px 400px at 90% 5%,
+            transparent 70%),
+        radial-gradient(900px 400px at 90% 5%,
             var(--bg-orb-secondary),
-            transparent 65%
-        ),
-        linear-gradient(
-            180deg,
+            transparent 65%),
+        linear-gradient(180deg,
             var(--bg-gradient-start) 0%,
             var(--bg-gradient-mid) 50%,
-            var(--bg-gradient-end) 100%
-        );
+            var(--bg-gradient-end) 100%);
     transition: background var(--transition-theme);
 }
 
@@ -308,11 +345,9 @@ a:hover {
 
 /* ── Utility Classes ─────────────────────────────────────────── */
 .text-gradient {
-    background: linear-gradient(
-        135deg,
-        var(--accent-primary),
-        var(--accent-secondary)
-    );
+    background: linear-gradient(135deg,
+            var(--accent-primary),
+            var(--accent-secondary));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -374,6 +409,7 @@ a:hover {
         opacity: 0;
         transform: translateY(12px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -385,6 +421,7 @@ a:hover {
         opacity: 0;
         transform: scale(0.97) translateY(8px);
     }
+
     to {
         opacity: 1;
         transform: scale(1) translateY(0);
@@ -396,6 +433,7 @@ a:hover {
         opacity: 0;
         transform: translateY(20px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -403,10 +441,12 @@ a:hover {
 }
 
 @keyframes lumaPulse {
+
     0%,
     100% {
         opacity: 1;
     }
+
     50% {
         opacity: 0.5;
     }
@@ -416,6 +456,7 @@ a:hover {
     0% {
         background-position: -200% 0;
     }
+
     100% {
         background-position: 200% 0;
     }
@@ -427,6 +468,7 @@ a:hover {
         opacity: 0;
         transform: translateY(12px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -435,6 +477,7 @@ a:hover {
 
 /* ── Reduced Motion ──────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
+
     *,
     *::before,
     *::after {

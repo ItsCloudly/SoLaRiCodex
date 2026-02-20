@@ -1,6 +1,5 @@
 import { createAsync } from '@solidjs/router';
 import { createEffect, createSignal, onMount } from 'solid-js';
-import MainLayout from '~/components/layout/MainLayout';
 import { Card, CardHeader, CardTitle, Badge, Progress, Button } from '~/components/ui';
 import { Activity, Pause, Play, X, Download, Clock, HardDrive } from 'lucide-solid';
 import { fetchJson, requestJson } from '~/lib/api';
@@ -116,11 +115,17 @@ export default function ActivityPage() {
   }
 
   return (
-    <MainLayout>
+    <>
+
       <div class="activity-page">
-        <header class="page-header">
-          <Activity size={28} class="header-icon" />
-          <h1 class="section-title">Activity</h1>
+        <header class="cinematic-page-header">
+          <div class="header-title">
+            <Activity size={28} class="header-icon" />
+            <div>
+              <h1 class="cinematic-title">Transfer Pulse</h1>
+              <p class="cinematic-subtitle">Live download activity tracking</p>
+            </div>
+          </div>
         </header>
 
         {loadError() && (
@@ -249,7 +254,8 @@ export default function ActivityPage() {
           </Card>
         </div>
       </div>
-    </MainLayout>
+    </>
+
   );
 }
 

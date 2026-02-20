@@ -1,98 +1,98 @@
 // ============================================================
 // LUMA DESIGN SYSTEM — Design Tokens
-// Apple-inspired minimalist design language for SoLaRi
+// Cinematic Luxury Dark Mode for SoLaRi
 // ============================================================
 
 :root {
-  // ── Color Palette (Light Mode) ─────────────────────────────
-  --bg-primary: #fafafa;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #f5f5f7;
-  --bg-elevated: #ffffff;
+  // ── Color Palette (Cinematic Dark Mode) ─────────────────────────────
+  --bg-primary: #050505;
+  --bg-secondary: #0d0d0d;
+  --bg-tertiary: #141414;
+  --bg-elevated: #1a1a1a;
 
-  // Accent — Refined Indigo
-  --accent-primary: #5856d6;
-  --accent-primary-dim: #4f4dc8;
-  --accent-primary-glow: rgba(88, 86, 214, 0.15);
+  // Accent — Cinematic Gold
+  --accent-primary: #D4AF37;
+  --accent-primary-dim: #AA8B2B;
+  --accent-primary-glow: rgba(212, 175, 55, 0.15);
 
-  // Secondary Accent — Soft Teal
-  --accent-secondary: #32ade6;
-  --accent-secondary-dim: #2a9fd4;
-  --accent-secondary-glow: rgba(50, 173, 230, 0.12);
+  // Secondary Accent — Deep Red
+  --accent-secondary: #990000;
+  --accent-secondary-dim: #660000;
+  --accent-secondary-glow: rgba(153, 0, 0, 0.15);
 
   // Status Colors
-  --success: #34c759;
-  --warning: #ff9f0a;
-  --error: #ff3b30;
-  --info: #5ac8fa;
+  --success: #1E3A2A;
+  --warning: #D4AF37;
+  --error: #990000;
+  --info: #2A3B4C;
 
   // Text Colors
-  --text-primary: #1d1d1f;
-  --text-secondary: #6e6e73;
-  --text-muted: #aeaeb2;
-  --text-accent: #5856d6;
+  --text-primary: #ECECEC;
+  --text-secondary: #A0A0A0;
+  --text-muted: #555555;
+  --text-accent: #D4AF37;
 
   // Border Colors
-  --border-primary: rgba(0, 0, 0, 0.06);
-  --border-accent: rgba(88, 86, 214, 0.3);
-  --border-dim: rgba(0, 0, 0, 0.04);
+  --border-primary: rgba(255, 255, 255, 0.05);
+  --border-accent: rgba(212, 175, 55, 0.3);
+  --border-dim: rgba(255, 255, 255, 0.02);
 
   // ── Typography ─────────────────────────────────────────────
-  --font-display: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-body: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  --font-display: "Cinzel", serif;
+  --font-body: "DM Sans", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
 
   // ── Spacing (8pt grid) ────────────────────────────────────
-  --space-xs: 0.25rem;   // 4px
-  --space-sm: 0.5rem;    // 8px
-  --space-md: 1rem;      // 16px
-  --space-lg: 1.5rem;    // 24px
-  --space-xl: 2rem;      // 32px
-  --space-2xl: 3rem;     // 48px
-  --space-3xl: 4rem;     // 64px
+  --space-xs: 0.25rem; // 4px
+  --space-sm: 0.5rem; // 8px
+  --space-md: 1rem; // 16px
+  --space-lg: 1.5rem; // 24px
+  --space-xl: 2rem; // 32px
+  --space-2xl: 3rem; // 48px
+  --space-3xl: 4rem; // 64px
 
   // ── Border Radius ─────────────────────────────────────────
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
   --radius-full: 9999px;
 
   // ── Shadows ───────────────────────────────────────────────
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05), 0 1px 4px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.03);
-  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04);
-  --shadow-glow: 0 0 20px var(--accent-primary-glow);
-  --shadow-glow-cyan: 0 0 20px var(--accent-secondary-glow);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.7), 0 1px 4px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.8), 0 2px 8px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.9), 0 4px 16px rgba(0, 0, 0, 0.7);
+  --shadow-glow: 0 0 24px var(--accent-primary-glow);
+  --shadow-glow-cyan: 0 0 24px var(--accent-secondary-glow);
   --shadow-card: var(--shadow-md);
 
   // ── Glass / Frosted Effects ───────────────────────────────
-  --glass-bg: rgba(255, 255, 255, 0.72);
-  --glass-bg-heavy: rgba(255, 255, 255, 0.85);
-  --glass-border: rgba(255, 255, 255, 0.5);
-  --glass-blur: blur(20px) saturate(180%);
-  --glass-blur-heavy: blur(40px) saturate(200%);
+  --glass-bg: rgba(5, 5, 5, 0.7);
+  --glass-bg-heavy: rgba(5, 5, 5, 0.9);
+  --glass-border: rgba(255, 255, 255, 0.05);
+  --glass-blur: blur(24px) saturate(150%);
+  --glass-blur-heavy: blur(48px) saturate(200%);
 
   // ── Transitions ───────────────────────────────────────────
-  --transition-fast: 150ms cubic-bezier(0.25, 0.1, 0.25, 1);
-  --transition-medium: 300ms cubic-bezier(0.25, 0.1, 0.25, 1);
-  --transition-slow: 500ms cubic-bezier(0.25, 0.1, 0.25, 1);
-  --transition-theme: 400ms cubic-bezier(0.25, 0.1, 0.25, 1);
-  --transition-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-fast: 200ms cubic-bezier(0.2, 0, 0, 1);
+  --transition-medium: 400ms cubic-bezier(0.2, 0, 0, 1);
+  --transition-slow: 600ms cubic-bezier(0.2, 0, 0, 1);
+  --transition-theme: 500ms cubic-bezier(0.2, 0, 0, 1);
+  --transition-spring: 600ms cubic-bezier(0.2, 0.8, 0.2, 1);
 
   // ── Ambient Background ────────────────────────────────────
-  --bg-gradient-start: #fafafa;
-  --bg-gradient-mid: #f5f5f7;
-  --bg-gradient-end: #efefef;
-  --bg-orb-primary: rgba(88, 86, 214, 0.045);
-  --bg-orb-secondary: rgba(50, 173, 230, 0.035);
-  --grid-line-color: rgba(0, 0, 0, 0.018);
+  --bg-gradient-start: #030303;
+  --bg-gradient-mid: #0a0a0a;
+  --bg-gradient-end: #121212;
+  --bg-orb-primary: rgba(212, 175, 55, 0.03);
+  --bg-orb-secondary: rgba(153, 0, 0, 0.03);
+  --grid-line-color: transparent;
 
   // ── Misc ──────────────────────────────────────────────────
-  --link-hover: #4f4dc8;
-  --scrollbar-track: rgba(0, 0, 0, 0.04);
-  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
-  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
+  --link-hover: #E8C547;
+  --scrollbar-track: rgba(255, 255, 255, 0.02);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.08);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.15);
 }
