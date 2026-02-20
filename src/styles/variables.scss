@@ -1,63 +1,98 @@
+// ============================================================
+// LUMA DESIGN SYSTEM — Design Tokens
+// Apple-inspired minimalist design language for SoLaRi
+// ============================================================
+
 :root {
-  /* Retro-futuristic industrial color palette */
-  --bg-primary: #0a0a0b;
-  --bg-secondary: #111113;
-  --bg-tertiary: #1a1a1d;
-  --bg-elevated: #222226;
-  
-  /* Amber accent - vintage terminal */
-  --accent-primary: #ffb000;
-  --accent-primary-dim: #cc8c00;
-  --accent-primary-glow: rgba(255, 176, 0, 0.3);
-  
-  /* Electric cyan secondary */
-  --accent-secondary: #00d4ff;
-  --accent-secondary-dim: #00a8cc;
-  --accent-secondary-glow: rgba(0, 212, 255, 0.3);
-  
-  /* Status colors */
-  --success: #00ff88;
-  --warning: #ffaa00;
-  --error: #ff4444;
-  --info: #00d4ff;
-  
-  /* Text colors */
-  --text-primary: #f5f5f5;
-  --text-secondary: #a0a0a0;
-  --text-muted: #666666;
-  --text-accent: #ffb000;
-  
-  /* Border colors */
-  --border-primary: #2a2a2e;
-  --border-accent: #ffb000;
-  --border-dim: #1f1f23;
-  
-  /* Typography */
-  --font-display: 'Space Grotesk', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-  --font-body: 'DM Sans', system-ui, sans-serif;
-  
-  /* Spacing */
-  --space-xs: 0.25rem;
-  --space-sm: 0.5rem;
-  --space-md: 1rem;
-  --space-lg: 1.5rem;
-  --space-xl: 2rem;
-  --space-2xl: 3rem;
-  
-  /* Border radius */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  // ── Color Palette (Light Mode) ─────────────────────────────
+  --bg-primary: #fafafa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f5f5f7;
+  --bg-elevated: #ffffff;
+
+  // Accent — Refined Indigo
+  --accent-primary: #5856d6;
+  --accent-primary-dim: #4f4dc8;
+  --accent-primary-glow: rgba(88, 86, 214, 0.15);
+
+  // Secondary Accent — Soft Teal
+  --accent-secondary: #32ade6;
+  --accent-secondary-dim: #2a9fd4;
+  --accent-secondary-glow: rgba(50, 173, 230, 0.12);
+
+  // Status Colors
+  --success: #34c759;
+  --warning: #ff9f0a;
+  --error: #ff3b30;
+  --info: #5ac8fa;
+
+  // Text Colors
+  --text-primary: #1d1d1f;
+  --text-secondary: #6e6e73;
+  --text-muted: #aeaeb2;
+  --text-accent: #5856d6;
+
+  // Border Colors
+  --border-primary: rgba(0, 0, 0, 0.06);
+  --border-accent: rgba(88, 86, 214, 0.3);
+  --border-dim: rgba(0, 0, 0, 0.04);
+
+  // ── Typography ─────────────────────────────────────────────
+  --font-display: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+
+  // ── Spacing (8pt grid) ────────────────────────────────────
+  --space-xs: 0.25rem;   // 4px
+  --space-sm: 0.5rem;    // 8px
+  --space-md: 1rem;      // 16px
+  --space-lg: 1.5rem;    // 24px
+  --space-xl: 2rem;      // 32px
+  --space-2xl: 3rem;     // 48px
+  --space-3xl: 4rem;     // 64px
+
+  // ── Border Radius ─────────────────────────────────────────
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
   --radius-full: 9999px;
-  
-  /* Shadows */
+
+  // ── Shadows ───────────────────────────────────────────────
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05), 0 1px 4px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.03);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04);
   --shadow-glow: 0 0 20px var(--accent-primary-glow);
   --shadow-glow-cyan: 0 0 20px var(--accent-secondary-glow);
-  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.4);
-  
-  /* Transitions */
-  --transition-fast: 150ms ease;
-  --transition-medium: 300ms ease;
-  --transition-slow: 500ms ease;
+  --shadow-card: var(--shadow-md);
+
+  // ── Glass / Frosted Effects ───────────────────────────────
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-bg-heavy: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  --glass-blur: blur(20px) saturate(180%);
+  --glass-blur-heavy: blur(40px) saturate(200%);
+
+  // ── Transitions ───────────────────────────────────────────
+  --transition-fast: 150ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  --transition-medium: 300ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  --transition-slow: 500ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  --transition-theme: 400ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  --transition-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  // ── Ambient Background ────────────────────────────────────
+  --bg-gradient-start: #fafafa;
+  --bg-gradient-mid: #f5f5f7;
+  --bg-gradient-end: #efefef;
+  --bg-orb-primary: rgba(88, 86, 214, 0.045);
+  --bg-orb-secondary: rgba(50, 173, 230, 0.035);
+  --grid-line-color: rgba(0, 0, 0, 0.018);
+
+  // ── Misc ──────────────────────────────────────────────────
+  --link-hover: #4f4dc8;
+  --scrollbar-track: rgba(0, 0, 0, 0.04);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
 }

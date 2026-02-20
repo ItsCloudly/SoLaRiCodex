@@ -1,4 +1,9 @@
-import { Component, JSX } from 'solid-js';
+import { Component, JSX } from "solid-js";
+
+// Re-export theme utilities
+export { ThemeProvider, useTheme } from "./ThemeProvider";
+export type { ThemeMode } from "./ThemeProvider";
+export { default as ThemeToggle } from "./ThemeToggle";
 
 interface CardProps {
   children: JSX.Element;
@@ -9,7 +14,7 @@ interface CardProps {
 
 export const Card: Component<CardProps> = (props) => {
   return (
-    <div class={`card ${props.class || ''}`} onClick={props.onClick}>
+    <div class={`card ${props.class || ""}`} onClick={props.onClick}>
       {props.children}
     </div>
   );
@@ -20,11 +25,7 @@ interface CardHeaderProps {
 }
 
 export const CardHeader: Component<CardHeaderProps> = (props) => {
-  return (
-    <div class="card-header">
-      {props.children}
-    </div>
-  );
+  return <div class="card-header">{props.children}</div>;
 };
 
 interface CardTitleProps {
@@ -32,45 +33,48 @@ interface CardTitleProps {
 }
 
 export const CardTitle: Component<CardTitleProps> = (props) => {
-  return (
-    <h3 class="card-title">
-      {props.children}
-    </h3>
-  );
+  return <h3 class="card-title">{props.children}</h3>;
 };
 
 interface ButtonProps {
   children: JSX.Element;
-  variant?: 'primary' | 'secondary' | 'ghost';
-  size?: 'sm' | 'md' | 'lg';
+  variant?: "primary" | "secondary" | "ghost";
+  size?: "sm" | "md" | "lg";
   onClick?: () => void;
   disabled?: boolean;
-  type?: 'button' | 'submit';
+  type?: "button" | "submit";
   class?: string;
 }
 
 export const Button: Component<ButtonProps> = (props) => {
   const variantClass = () => {
     switch (props.variant) {
-      case 'primary': return 'btn-primary';
-      case 'secondary': return 'btn-secondary';
-      case 'ghost': return 'btn-ghost';
-      default: return '';
+      case "primary":
+        return "btn-primary";
+      case "secondary":
+        return "btn-secondary";
+      case "ghost":
+        return "btn-ghost";
+      default:
+        return "";
     }
   };
 
   const sizeClass = () => {
     switch (props.size) {
-      case 'sm': return 'btn-sm';
-      case 'lg': return 'btn-lg';
-      default: return '';
+      case "sm":
+        return "btn-sm";
+      case "lg":
+        return "btn-lg";
+      default:
+        return "";
     }
   };
 
   return (
     <button
-      type={props.type || 'button'}
-      class={`btn ${variantClass()} ${sizeClass()} ${props.class || ''}`}
+      type={props.type || "button"}
+      class={`btn ${variantClass()} ${sizeClass()} ${props.class || ""}`}
       onClick={props.onClick}
       disabled={props.disabled}
     >
@@ -81,25 +85,26 @@ export const Button: Component<ButtonProps> = (props) => {
 
 interface BadgeProps {
   children: JSX.Element;
-  variant?: 'default' | 'success' | 'warning' | 'error' | 'info';
+  variant?: "default" | "success" | "warning" | "error" | "info";
 }
 
 export const Badge: Component<BadgeProps> = (props) => {
   const variantClass = () => {
     switch (props.variant) {
-      case 'success': return 'badge-success';
-      case 'warning': return 'badge-warning';
-      case 'error': return 'badge-error';
-      case 'info': return 'badge-info';
-      default: return '';
+      case "success":
+        return "badge-success";
+      case "warning":
+        return "badge-warning";
+      case "error":
+        return "badge-error";
+      case "info":
+        return "badge-info";
+      default:
+        return "";
     }
   };
 
-  return (
-    <span class={`badge ${variantClass()}`}>
-      {props.children}
-    </span>
-  );
+  return <span class={`badge ${variantClass()}`}>{props.children}</span>;
 };
 
 interface ProgressProps {
@@ -131,8 +136,8 @@ interface InputProps {
 export const Input: Component<InputProps> = (props) => {
   return (
     <input
-      type={props.type || 'text'}
-      class={`input ${props.class || ''}`}
+      type={props.type || "text"}
+      class={`input ${props.class || ""}`}
       placeholder={props.placeholder}
       value={props.value}
       onInput={(e) => props.onInput?.(e.currentTarget.value)}
