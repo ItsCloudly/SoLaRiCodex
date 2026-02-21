@@ -1,0 +1,39 @@
+{
+  "request_post_data": "\n\u0004echo\u0012.piast-gliwice-vs-motor-lublin-football-1380579\u001a\u00011",
+  "request_headers": {
+    "sec-ch-ua-platform": "\"Windows\"",
+    "referer": "https://embedsporty.top/embed/echo/piast-gliwice-vs-motor-lublin-football-1380579/1",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
+    "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"HeadlessChrome\";v=\"145\", \"Chromium\";v=\"145\"",
+    "content-type": "application/octet-stream",
+    "sec-ch-ua-mobile": "?0"
+  },
+  "request_method": "POST",
+  "url": "https://embedsporty.top/fetch",
+  "status": 200,
+  "response_headers": {
+    "access-control-expose-headers": "goat",
+    "cf-cache-status": "DYNAMIC",
+    "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=8Ttmvs8zn35dnc%2BqzBgaMt3G3IFNIllxkBrFhy%2Bz8IxnrBuzbscmQ9O0FH5uwDJn%2BTUxsmjce9slZh0iKXBgJ00%2BWAs0aeRQi2iWqMnODA%3D%3D\"}]}",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "server-timing": "cfExtPri",
+    "date": "Fri, 20 Feb 2026 17:54:29 GMT",
+    "content-type": "application/octet-stream",
+    "x-cache-hits": "0",
+    "priority": "u=1,i",
+    "x-cache-status": "MISS",
+    "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "goat": "NOSCRPSaRBPfpvGGFNvbUTYyufUUMhVm",
+    "cf-ray": "9d0fde979bc4cee6-FRA",
+    "accept-ranges": "bytes",
+    "access-control-allow-origin": "*",
+    "x-cache-ttl": "300.000",
+    "content-length": "223",
+    "x-cache-age": "0.000",
+    "server": "cloudflare"
+  },
+  "body_len": 223,
+  "body_utf8": "\n�\u0001[2/Y1_'j\"{NZ-z/.xi)#ayxx/$z.~Op](kK0.YLd2K[Xf\"h%Iq,zk}$k#ic*nGlLz*\"^.a[Z%`cx`1|[|HI|##\"iZ#$J&fBBLJ}c&qYbO]\\Y*z1KJ+La(1%\"33N#0i#h2^%^`nBj~1#OyK)^b}.`3Hk_ZIBdo&-$3xHF[&mJhBGlpq],%fqcLg))c^!)$[qc2}%k(jhye}fmL3iJZoizP%o{P~,T",
+  "body_hex": "0adc015b322f59315f276a227b4e5a2d7a2f2e78692923617978782f247a2e7e4f705d286b4b302e594c64324b5b586622682549712c7a6b7d246b2369632a6e476c4c7a2a225e2e615b5a2560637860317c5b7c48497c232322695a23244a266642424c4a7d63267159624f5d5c592a7a314b4a2b4c612831252233334e2330692368325e255e606e426a7e31234f794b295e627d2e6033486b5f5a4942646f262d24337848465b266d4a6842476c70715d2c256671634c672929635e2129245b7163327d256b286a6879657d666d4c33694a5a6f697a50256f7b507e2c54",
+  "jw_file": null
+}

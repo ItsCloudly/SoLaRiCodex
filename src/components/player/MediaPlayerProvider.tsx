@@ -12,6 +12,7 @@ import {
   useContext,
 } from 'solid-js';
 import { Disc3, Expand, GripVertical, Minimize2, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX, X } from 'lucide-solid';
+import Hls from 'hls.js';
 import { requestJson } from '~/lib/api';
 
 export type PlayerMediaType = 'video' | 'audio';
@@ -198,6 +199,7 @@ export function MediaPlayerPanel() {
   const [playlistFeedback, setPlaylistFeedback] = createSignal<string | null>(null);
   const [artworkLoadFailed, setArtworkLoadFailed] = createSignal(false);
   const [isOpeningExternal, setIsOpeningExternal] = createSignal(false);
+  const [isVideoCompatibilityStream, setIsVideoCompatibilityStream] = createSignal(false);
   const [compatibilitySeekBaseSeconds, setCompatibilitySeekBaseSeconds] = createSignal(0);
   const [showLibraryPicker, setShowLibraryPicker] = createSignal(false);
   const [draggingIndex, setDraggingIndex] = createSignal<number | null>(null);
@@ -228,12 +230,19 @@ export function MediaPlayerPanel() {
     artist: null,
     album: null,
   });
+  let hlsInstance: Hls | null = null;
   const [videoAudioTracks, setVideoAudioTracks] = createSignal<VideoAudioTrackOption[]>([]);
   const [videoSubtitleTracks, setVideoSubtitleTracks] = createSignal<VideoSubtitleTrackOption[]>([]);
   const [selectedVideoAudioStreamIndex, setSelectedVideoAudioStreamIndex] = createSignal<number | null>(null);
   const [selectedVideoSubtitleTrackId, setSelectedVideoSubtitleTrackId] = createSignal<string | null>(null);
   const [selectedVideoSubtitleSrc, setSelectedVideoSubtitleSrc] = createSignal<string | null>(null);
   const [preferredAudioLanguage, setPreferredAudioLanguage] = createSignal<string | null>(null);
+
+  // Subtitle Customization State
+  const [showSubtitleSettings, setShowSubtitleSettings] = createSignal(false);
+  const [subtitleFontFamily, setSubtitleFontFamily] = createSignal('var(--font-body)');
+  const [subtitleColor, setSubtitleColor] = createSignal('#ffffff');
+  const [subtitleOpacity, setSubtitleOpacity] = createSignal(1);
 
   let videoRef: HTMLVideoElement | undefined;
   let audioRef: HTMLAudioElement | undefined;
@@ -423,12 +432,11 @@ export function MediaPlayerPanel() {
     return normalized;
   };
 
-  const isCompatibilityVideoUrl = (url: string): boolean => (
-    url.includes('/api/media/playback/video-compat/')
-  );
-
   const buildVideoPlaybackUrl = (item: PlayerQueueItem, options?: { start?: number }): string => {
     if (typeof window === 'undefined') return item.streamUrl;
+    if (item.streamUrl.startsWith('http://') || item.streamUrl.startsWith('https://')) {
+      return item.streamUrl;
+    }
     const streamUrl = new URL(item.streamUrl, window.location.origin);
     const selectedAudio = selectedVideoAudioStreamIndex();
     if (Number.isInteger(selectedAudio) && selectedAudio !== null) {
@@ -552,6 +560,16 @@ export function MediaPlayerPanel() {
   const loadVideoPlaybackOptions = async (item: PlayerQueueItem) => {
     if (item.mediaType !== 'video') return;
     if (item.mediaKind !== 'movie' && item.mediaKind !== 'episode') return;
+    if (item.streamUrl.startsWith('http://') || item.streamUrl.startsWith('https://')) {
+      // It's a remote live stream (like sports), so no local metadata exists.
+      setVideoAudioTracks([]);
+      setVideoSubtitleTracks([]);
+      setSelectedVideoAudioStreamIndex(null);
+      setSelectedVideoSubtitleTrackId(null);
+      setSelectedVideoSubtitleSrc(null);
+      setIsVideoCompatibilityStream(false);
+      return;
+    }
 
     const response = await requestJson<VideoOptionsResponse>(`/api/media/playback/video-options/${item.mediaKind}/${item.mediaId}`);
     if (response.error || !response.data) {
@@ -580,6 +598,7 @@ export function MediaPlayerPanel() {
     setSelectedVideoAudioStreamIndex(defaultTrack ? defaultTrack.streamIndex : null);
     setSelectedVideoSubtitleTrackId(null);
     setSelectedVideoSubtitleSrc(null);
+    setIsVideoCompatibilityStream(response.data.hasCompatibilityStream || false);
   };
 
   const persistProgress = async (options?: { force?: boolean; completed?: boolean }) => {
@@ -590,7 +609,7 @@ export function MediaPlayerPanel() {
 
     const currentTime = Number.isFinite(mediaElement.currentTime) ? mediaElement.currentTime : 0;
     const absoluteCurrentTime = (
-      item.mediaType === 'video' && isCompatibilityVideoUrl(item.streamUrl)
+      item.mediaType === 'video' && isVideoCompatibilityStream()
     )
       ? currentTime + compatibilitySeekBaseSeconds()
       : currentTime;
@@ -697,7 +716,7 @@ export function MediaPlayerPanel() {
     const mediaElement = getActiveElement();
     const item = player.currentItem();
     if (mediaElement) {
-      if (item?.mediaType === 'video' && isCompatibilityVideoUrl(item.streamUrl)) {
+      if (item?.mediaType === 'video' && isVideoCompatibilityStream()) {
         await seekByCompatibilityRestart(0);
       } else {
         mediaElement.currentTime = 0;
@@ -834,7 +853,7 @@ export function MediaPlayerPanel() {
   const seekByCompatibilityRestart = async (targetSeconds: number) => {
     const item = player.currentItem();
     const mediaElement = getActiveElement();
-    if (!item || !mediaElement || item.mediaType !== 'video' || !isCompatibilityVideoUrl(item.streamUrl)) return;
+    if (!item || !mediaElement || item.mediaType !== 'video' || !isVideoCompatibilityStream()) return;
 
     const duration = durationSeconds();
     const clampedTarget = clamp(targetSeconds, 0, duration > 0 ? duration : targetSeconds);
@@ -858,7 +877,7 @@ export function MediaPlayerPanel() {
     const duration = Number.isFinite(mediaElement.duration) ? mediaElement.duration : durationSeconds() || Infinity;
     const item = player.currentItem();
     const baseCurrent = (
-      item?.mediaType === 'video' && isCompatibilityVideoUrl(item.streamUrl)
+      item?.mediaType === 'video' && isVideoCompatibilityStream()
     )
       ? currentSeconds()
       : mediaElement.currentTime;
@@ -874,7 +893,7 @@ export function MediaPlayerPanel() {
     const duration = Number.isFinite(mediaElement.duration) ? mediaElement.duration : durationSeconds();
     const clamped = clamp(nextSeconds, 0, duration > 0 ? duration : nextSeconds);
     const item = player.currentItem();
-    if (item?.mediaType === 'video' && isCompatibilityVideoUrl(item.streamUrl)) {
+    if (item?.mediaType === 'video' && isVideoCompatibilityStream()) {
       void seekByCompatibilityRestart(clamped);
       return;
     }
@@ -935,7 +954,7 @@ export function MediaPlayerPanel() {
     const mediaElement = event.currentTarget as HTMLMediaElement;
     const item = player.currentItem();
     const absoluteSeconds = (
-      item?.mediaType === 'video' && isCompatibilityVideoUrl(item.streamUrl)
+      item?.mediaType === 'video' && isVideoCompatibilityStream()
     )
       ? (mediaElement.currentTime || 0) + compatibilitySeekBaseSeconds()
       : (mediaElement.currentTime || 0);
@@ -1005,8 +1024,6 @@ export function MediaPlayerPanel() {
           }
           setIsScrubbing(false);
         }}
-        onPointerUp={() => setIsScrubbing(false)}
-        onBlur={() => setIsScrubbing(false)}
       />
       <span>{formatDuration(durationSeconds())}</span>
     </div>
@@ -1017,10 +1034,12 @@ export function MediaPlayerPanel() {
     if (!item || item.mediaType !== 'video') return null;
 
     return (
-      <div class="media-player-track-selectors">
-        <label class="media-player-track-select">
+      <div class="media-player-track-selectors" style={{ "position": "relative" }}>
+        <label class="media-player-track-select" style={{ "display": "flex", "align-items": "center", "gap": "0.5rem", "font-weight": "bold" }}>
           <span>Audio</span>
           <select
+            class="input"
+            style={{ "padding": "0.4rem 0.8rem", "font-size": "0.9rem" }}
             value={selectedVideoAudioStreamIndex() === null ? '' : String(selectedVideoAudioStreamIndex())}
             onChange={(event) => {
               const raw = event.currentTarget.value;
@@ -1041,9 +1060,11 @@ export function MediaPlayerPanel() {
             ))}
           </select>
         </label>
-        <label class="media-player-track-select">
+        <label class="media-player-track-select" style={{ "display": "flex", "align-items": "center", "gap": "0.5rem", "font-weight": "bold" }}>
           <span>Subtitles</span>
           <select
+            class="input"
+            style={{ "padding": "0.4rem 0.8rem", "font-size": "0.9rem" }}
             value={selectedVideoSubtitleTrackId() || ''}
             onChange={(event) => {
               const raw = event.currentTarget.value;
@@ -1056,6 +1077,61 @@ export function MediaPlayerPanel() {
             ))}
           </select>
         </label>
+
+        <Show when={selectedVideoSubtitleTrackId()}>
+          <button
+            type="button"
+            class="btn btn-sm"
+            onClick={() => setShowSubtitleSettings(!showSubtitleSettings())}
+            style={{ "margin-left": "0.5rem" }}
+          >
+            ⚙️ Style
+          </button>
+        </Show>
+
+        <Show when={showSubtitleSettings() && selectedVideoSubtitleTrackId()}>
+          <div
+            class="card"
+            style={{
+              "position": "absolute",
+              "bottom": "110%",
+              "right": "0",
+              "width": "260px",
+              "z-index": "100",
+              "display": "flex",
+              "flex-direction": "column",
+              "gap": "1rem",
+              "padding": "1rem"
+            }}
+          >
+            <div style={{ "display": "flex", "justify-content": "space-between", "align-items": "center", "margin-bottom": "0.5rem" }}>
+              <strong style={{ "font-family": "var(--font-display)", "color": "var(--accent-primary)" }}>Subtitle Style</strong>
+              <button class="btn-ghost" onClick={() => setShowSubtitleSettings(false)} style={{ "cursor": "pointer", "border": "none", "background": "transparent" }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <label style={{ "display": "flex", "flex-direction": "column", "gap": "0.3rem", "font-weight": "bold", "font-size": "0.9rem" }}>
+              Font Family
+              <select class="input" style={{ "padding": "0.4rem", "font-size": "0.9rem" }} value={subtitleFontFamily()} onChange={(e) => setSubtitleFontFamily(e.currentTarget.value)}>
+                <option value="var(--font-body)">Chewy (Bubbly)</option>
+                <option value="var(--font-mono)">Comic Neue (Hand)</option>
+                <option value="var(--font-display)">Shrikhand (Chunky)</option>
+                <option value="sans-serif">Standard Sans</option>
+              </select>
+            </label>
+
+            <label style={{ "display": "flex", "flex-direction": "column", "gap": "0.3rem", "font-weight": "bold", "font-size": "0.9rem" }}>
+              Color
+              <input type="color" class="input" style={{ "padding": "0.2rem", "height": "40px", "cursor": "pointer" }} value={subtitleColor()} onInput={(e) => setSubtitleColor(e.currentTarget.value)} />
+            </label>
+
+            <label style={{ "display": "flex", "flex-direction": "column", "gap": "0.3rem", "font-weight": "bold", "font-size": "0.9rem" }}>
+              Opacity ({Math.round(subtitleOpacity() * 100)}%)
+              <input type="range" class="input" min="0.1" max="1" step="0.1" value={subtitleOpacity()} onInput={(e) => setSubtitleOpacity(e.currentTarget.valueAsNumber)} />
+            </label>
+          </div>
+        </Show>
       </div>
     );
   };
@@ -1311,6 +1387,17 @@ export function MediaPlayerPanel() {
       setPreferredAudioLanguage(storedPreferredAudioLanguage);
     }
 
+    const storedSubFont = window.localStorage.getItem('solari-sub-font');
+    if (storedSubFont) setSubtitleFontFamily(storedSubFont);
+
+    const storedSubColor = window.localStorage.getItem('solari-sub-color');
+    if (storedSubColor) setSubtitleColor(storedSubColor);
+
+    const storedSubOpacity = window.localStorage.getItem('solari-sub-opacity');
+    if (storedSubOpacity && !Number.isNaN(Number.parseFloat(storedSubOpacity))) {
+      setSubtitleOpacity(Number.parseFloat(storedSubOpacity));
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!player.isOpen()) return;
       const target = event.target as HTMLElement | null;
@@ -1363,6 +1450,13 @@ export function MediaPlayerPanel() {
     } else {
       window.localStorage.removeItem(PLAYER_PREFERRED_AUDIO_LANGUAGE_STORAGE_KEY);
     }
+  });
+
+  createEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('solari-sub-font', subtitleFontFamily());
+    window.localStorage.setItem('solari-sub-color', subtitleColor());
+    window.localStorage.setItem('solari-sub-opacity', String(subtitleOpacity()));
   });
 
   createEffect(() => {
@@ -1424,16 +1518,45 @@ export function MediaPlayerPanel() {
         setCompatibilitySeekBaseSeconds(0);
         setIsPlaying(false);
 
-        // Ensure we always switch to the newly selected stream before load().
-        mediaElement.src = item.mediaType === 'video'
-          ? buildVideoPlaybackUrl(item)
-          : item.streamUrl;
-        mediaElement.currentTime = 0;
-        mediaElement.load();
-        syncElementVolume();
+        // Handle HLS streams for non-Apple browsers
+        const targetSrc = item.mediaType === 'video' ? buildVideoPlaybackUrl(item) : item.streamUrl;
+
+        if (targetSrc.includes('.m3u8') && Hls.isSupported() && item.mediaType === 'video') {
+          if (hlsInstance) {
+            hlsInstance.destroy();
+            hlsInstance = null;
+          }
+          hlsInstance = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+          });
+          hlsInstance.loadSource(targetSrc);
+          hlsInstance.attachMedia(mediaElement);
+          hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+            syncElementVolume();
+            mediaElement.play().catch(e => console.warn('HLS autoplay blocked:', e));
+          });
+        } else {
+          // Standard MP4 / WebM / Native Apple HLS
+          if (hlsInstance) {
+            hlsInstance.destroy();
+            hlsInstance = null;
+          }
+          mediaElement.src = targetSrc;
+          mediaElement.currentTime = 0;
+          mediaElement.load();
+          syncElementVolume();
+        }
       };
 
       hydrateActiveElement();
+    });
+
+    onCleanup(() => {
+      if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+      }
     });
 
     void token;
@@ -1540,7 +1663,7 @@ export function MediaPlayerPanel() {
   createEffect(() => {
     const item = player.currentItem();
     if (!item || item.mediaType !== 'video') return;
-    if (!isCompatibilityVideoUrl(item.streamUrl)) return;
+    if (!isVideoCompatibilityStream()) return;
     const selectedAudio = selectedVideoAudioStreamIndex();
     if (selectedAudio === null) return;
     if (!videoRef) return;
@@ -1656,7 +1779,21 @@ export function MediaPlayerPanel() {
               class={`media-player-video-stage ${isFullscreen() ? 'is-fullscreen' : ''}`}
               onMouseMove={handleVideoStageMouseMove}
               onMouseLeave={handleVideoStageMouseLeave}
+              style={{
+                "--sub-font": subtitleFontFamily(),
+                "--sub-color": subtitleColor(),
+                "--sub-opacity": subtitleOpacity()
+              }}
             >
+              <style>{`
+                .media-player-video-stage video::cue {
+                  font-family: var(--sub-font, var(--font-body));
+                  color: var(--sub-color, #ffffff);
+                  background-color: rgba(0, 0, 0, var(--sub-opacity, 1));
+                  text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000;
+                  font-size: 1.5rem;
+                }
+              `}</style>
               <video
                 ref={videoRef}
                 class="media-player-video"

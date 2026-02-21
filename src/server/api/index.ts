@@ -9,6 +9,7 @@ import { indexersRoutes } from './indexers';
 import { qualityRoutes } from './quality';
 import { settingsRoutes } from './settings';
 import { delugeRoutes } from './deluge';
+import { sportsRouter } from './sports';
 import { ZodError } from 'zod';
 
 const app = new Hono();
@@ -25,6 +26,7 @@ app.route('/indexers', indexersRoutes);
 app.route('/quality-profiles', qualityRoutes);
 app.route('/settings', settingsRoutes);
 app.route('/deluge', delugeRoutes);
+app.route('/sports', sportsRouter);
 
 // Health check
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));

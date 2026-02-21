@@ -1,63 +1,71 @@
 :root {
-  /* Retro-futuristic industrial color palette */
-  --bg-primary: #0a0a0b;
-  --bg-secondary: #111113;
-  --bg-tertiary: #1a1a1d;
-  --bg-elevated: #222226;
-  
-  /* Amber accent - vintage terminal */
-  --accent-primary: #ffb000;
-  --accent-primary-dim: #cc8c00;
-  --accent-primary-glow: rgba(255, 176, 0, 0.3);
-  
-  /* Electric cyan secondary */
-  --accent-secondary: #00d4ff;
-  --accent-secondary-dim: #00a8cc;
-  --accent-secondary-glow: rgba(0, 212, 255, 0.3);
-  
+  /* Ultra-Vibrant Cartoony Palette */
+  --bg-primary: #fffac2;
+  /* Sunny yellow background */
+  --bg-secondary: #ffebf0;
+  /* Soft pink background */
+  --bg-tertiary: #dcf2ff;
+  /* Light blue */
+  --bg-elevated: #ffffff;
+
+  /* Neon accents */
+  --accent-primary: #ff0055;
+  /* Hot Pink */
+  --accent-primary-dim: #d10047;
+  --accent-primary-glow: rgba(255, 0, 85, 0.4);
+
+  --accent-secondary: #00e5ff;
+  /* Electric Blue */
+  --accent-secondary-dim: #00b8cc;
+  --accent-secondary-glow: rgba(0, 229, 255, 0.4);
+
   /* Status colors */
-  --success: #00ff88;
-  --warning: #ffaa00;
-  --error: #ff4444;
-  --info: #00d4ff;
-  
-  /* Text colors */
-  --text-primary: #f5f5f5;
-  --text-secondary: #a0a0a0;
-  --text-muted: #666666;
-  --text-accent: #ffb000;
-  
-  /* Border colors */
-  --border-primary: #2a2a2e;
-  --border-accent: #ffb000;
-  --border-dim: #1f1f23;
-  
+  --success: #39ff14;
+  /* Neon Green */
+  --warning: #ffb800;
+  /* Bright Yellow */
+  --error: #ff3333;
+  --info: #00aaff;
+
+  /* High contrast text */
+  --text-primary: #1a1a1a;
+  --text-secondary: #4a4a4a;
+  --text-muted: #7a7a7a;
+  --text-accent: #ff0055;
+
+  /* Thick borders for the cartoon outline effect */
+  --border-primary: #000000;
+  --border-accent: #000000;
+  --border-dim: #333333;
+
   /* Typography */
-  --font-display: 'Space Grotesk', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-  --font-body: 'DM Sans', system-ui, sans-serif;
-  
+  --font-display: 'Shrikhand', cursive;
+  --font-mono: 'Comic Neue', monospace;
+  --font-body: 'Chewy', system-ui, sans-serif;
+
   /* Spacing */
-  --space-xs: 0.25rem;
-  --space-sm: 0.5rem;
-  --space-md: 1rem;
-  --space-lg: 1.5rem;
-  --space-xl: 2rem;
-  --space-2xl: 3rem;
-  
-  /* Border radius */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --space-xs: 0.5rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
+  --space-2xl: 4rem;
+
+  /* Exaggerated rounded corners */
+  --radius-sm: 12px;
+  --radius-md: 24px;
+  --radius-lg: 36px;
   --radius-full: 9999px;
-  
-  /* Shadows */
-  --shadow-glow: 0 0 20px var(--accent-primary-glow);
-  --shadow-glow-cyan: 0 0 20px var(--accent-secondary-glow);
-  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.4);
-  
-  /* Transitions */
-  --transition-fast: 150ms ease;
-  --transition-medium: 300ms ease;
-  --transition-slow: 500ms ease;
+
+  /* Shadows - Neo-brutalist solid */
+  --shadow-glow: none;
+  --shadow-glow-cyan: none;
+  --shadow-card: 6px 6px 0px #000000;
+  --shadow-card-hover: 12px 12px 0px #000000;
+  --shadow-sm: 4px 4px 0px #000000;
+
+  /* Bouncy Transitions */
+  --transition-fast: 100ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --transition-medium: 200ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --transition-slow: 400ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }

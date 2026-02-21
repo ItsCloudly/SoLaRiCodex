@@ -4,6 +4,12 @@ import { Card, Button, Badge } from '~/components/ui';
 import { Tv, Plus, Search, Filter } from 'lucide-solid';
 import { fetchJson } from '~/lib/api';
 
+import tvShowsTitleAsset from '../../../buttons_assets/generated/transparent/tv_shows_title_1771671476027.png';
+import addButtonAsset from '../../../buttons_assets/generated/transparent/add_button_1771671540967.png';
+import filterButtonAsset from '../../../buttons_assets/generated/transparent/filter_button_2d_1771672880924.png';
+import searchBarAsset from '../../../buttons_assets/generated/transparent/search_bar_asset_2d_1771672842516.png';
+import panelBackgroundAsset from '../../../buttons_assets/generated/transparent/panel_background_2d_1771672912476.png';
+
 const fetchSeries = () => fetchJson<any[]>('/api/media/tv');
 
 export default function TVShows() {
@@ -19,29 +25,25 @@ export default function TVShows() {
     <MainLayout>
       <div class="tv-page">
         <header class="page-header">
-          <div class="header-title">
-            <Tv size={28} class="header-icon" />
-            <div>
-              <h1 class="section-title">TV Shows</h1>
-              <p class="header-subtitle">{series().length} series in library</p>
-            </div>
-          </div>
-
-          <div class="header-actions">
-            <div class="search-box">
-              <Search size={18} />
-              <input type="text" placeholder="Search TV shows..." class="input" />
+          <div class="header-wide-panel">
+            <div class="header-title" style="align-items: flex-end;">
+              <img src={tvShowsTitleAsset} alt="TV Shows" class="hero-image-title" />
             </div>
 
-            <Button variant="ghost">
-              <Filter size={18} />
-              Filter
-            </Button>
+            <div class="header-actions">
+              <div class="search-box playful-search-box" style={`background-image: url(${searchBarAsset});`}>
+                <Search size={18} />
+                <input type="text" placeholder="Search TV shows..." class="input" />
+              </div>
 
-            <Button variant="primary" onClick={openTvSearch}>
-              <Plus size={18} />
-              Add Series
-            </Button>
+              <button class="hero-action-button" title="Filter" aria-label="Filter" style="margin-right: 0.5rem;">
+                <img src={filterButtonAsset} alt="Filter" />
+              </button>
+
+              <button class="hero-action-button" onClick={openTvSearch} title="Add Series" aria-label="Add Series">
+                <img src={addButtonAsset} alt="Add Series" />
+              </button>
+            </div>
           </div>
         </header>
 
@@ -53,14 +55,12 @@ export default function TVShows() {
 
         <div class="series-grid">
           {series().length === 0 ? (
-            <div class="empty-state">
-              <Tv size={64} />
+            <div class="empty-state playful-panel">
               <h3>No TV shows yet</h3>
               <p>Start building your library by adding TV series</p>
-              <Button variant="primary" size="lg" onClick={openTvSearch}>
-                <Plus size={20} />
-                Add Your First Series
-              </Button>
+              <button class="hero-action-button" onClick={openTvSearch} title="Add Your First Series" aria-label="Add Your First Series" style="transform: scale(1.2); margin-top: 1rem;">
+                <img src={addButtonAsset} alt="Add Your First Series" />
+              </button>
             </div>
           ) : (
             series().map((show: any) => (

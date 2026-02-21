@@ -3804,6 +3804,295 @@ mediaRoutes.get('/playback/library', async (c) => {
   return c.json({ items });
 });
 
+// Get recently watched playable video items for home screen previews.
+mediaRoutes.get('/playback/recent', async (c) => {
+  interface PlaybackRecentVideoItem {
+    id: string;
+    mediaId: number;
+    mediaType: 'video';
+    mediaKind: 'movie' | 'episode';
+    title: string;
+    subtitle?: string;
+    posterPath?: string | null;
+    backdropPath?: string | null;
+    streamUrl: string;
+    progressPercent?: number;
+    updatedAt: number;
+  }
+
+  const parsedLimit = Number.parseInt(c.req.query('limit') || '', 10);
+  const limit = Number.isInteger(parsedLimit)
+    ? Math.min(12, Math.max(1, parsedLimit))
+    : 6;
+
+  const formatSeasonEpisodeCode = (seasonNumber: number, episodeNumber: number): string => {
+    const safeSeason = Math.max(0, seasonNumber);
+    const safeEpisode = Math.max(0, episodeNumber);
+    return `S${String(safeSeason).padStart(2, '0')}E${String(safeEpisode).padStart(2, '0')}`;
+  };
+
+  const toEpochMs = (value: unknown): number => {
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const parsed = Date.parse(value);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+    return 0;
+  };
+
+  try {
+    await Promise.all([
+      syncMoviesFromFilesystem(),
+      syncMusicFromFilesystem(),
+    ]);
+  } catch {
+    // Keep recent preview listing resilient even if sync fails.
+  }
+
+  const playbackProgressEntries = Object.values(await readPlaybackProgressMap())
+    .filter((entry) => entry.mediaKind === 'movie' || entry.mediaKind === 'episode')
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+
+  const movieProgressIds = Array.from(new Set(
+    playbackProgressEntries
+      .filter((entry) => entry.mediaKind === 'movie')
+      .map((entry) => entry.mediaId),
+  ));
+
+  const movieProgressRows = movieProgressIds.length === 0
+    ? []
+    : await db
+      .select({
+        mediaId: media.id,
+        title: media.title,
+        releaseDate: movies.releaseDate,
+        posterPath: media.posterPath,
+        backdropPath: media.backdropPath,
+      })
+      .from(movies)
+      .innerJoin(media, eq(movies.mediaId, media.id))
+      .where(and(
+        inArray(media.id, movieProgressIds),
+        eq(movies.status, 'downloaded'),
+      ));
+
+  const movieByMediaId = new Map<number, typeof movieProgressRows[number]>();
+  for (const row of movieProgressRows) {
+    movieByMediaId.set(row.mediaId, row);
+  }
+
+  const episodeProgressIds = Array.from(new Set(
+    playbackProgressEntries
+      .filter((entry) => entry.mediaKind === 'episode')
+      .map((entry) => entry.mediaId),
+  ));
+
+  const episodeProgressRows = episodeProgressIds.length === 0
+    ? []
+    : await db
+      .select({
+        id: episodes.id,
+        seriesId: episodes.seriesId,
+        season: episodes.season,
+        episode: episodes.episode,
+        episodeTitle: episodes.title,
+        filePath: episodes.filePath,
+      })
+      .from(episodes)
+      .where(and(
+        inArray(episodes.id, episodeProgressIds),
+        eq(episodes.downloaded, true),
+      ));
+
+  const episodeSeriesIds = Array.from(new Set(episodeProgressRows.map((row) => row.seriesId)));
+  const episodeSeriesRows = episodeSeriesIds.length === 0
+    ? []
+    : await db
+      .select({
+        seriesId: series.id,
+        title: media.title,
+        posterPath: media.posterPath,
+        backdropPath: media.backdropPath,
+      })
+      .from(series)
+      .innerJoin(media, eq(series.mediaId, media.id))
+      .where(inArray(series.id, episodeSeriesIds));
+
+  const seriesById = new Map<number, typeof episodeSeriesRows[number]>();
+  for (const row of episodeSeriesRows) {
+    seriesById.set(row.seriesId, row);
+  }
+
+  const episodeById = new Map<number, typeof episodeProgressRows[number]>();
+  for (const row of episodeProgressRows) {
+    if (!isAbsoluteOrRelativeFilePath(row.filePath)) continue;
+    const extension = path.extname(row.filePath).toLowerCase();
+    if (!PLAYABLE_VIDEO_EXTENSIONS.has(extension)) continue;
+    episodeById.set(row.id, row);
+  }
+
+  const previewItems: PlaybackRecentVideoItem[] = [];
+  const seenIds = new Set<string>();
+  const appendItem = (item: PlaybackRecentVideoItem) => {
+    if (seenIds.has(item.id)) return;
+    seenIds.add(item.id);
+    previewItems.push(item);
+  };
+
+  for (const progressEntry of playbackProgressEntries) {
+    if (previewItems.length >= limit) break;
+
+    const progressPercent = (
+      typeof progressEntry.durationSeconds === 'number'
+      && progressEntry.durationSeconds > 0
+    )
+      ? Math.max(0, Math.min(100, Math.round((progressEntry.positionSeconds / progressEntry.durationSeconds) * 100)))
+      : undefined;
+
+    if (progressEntry.mediaKind === 'movie') {
+      const movieRow = movieByMediaId.get(progressEntry.mediaId);
+      if (!movieRow) continue;
+
+      appendItem({
+        id: `movie-${movieRow.mediaId}`,
+        mediaId: movieRow.mediaId,
+        mediaType: 'video',
+        mediaKind: 'movie',
+        title: movieRow.title,
+        subtitle: movieRow.releaseDate || undefined,
+        posterPath: movieRow.posterPath,
+        backdropPath: movieRow.backdropPath,
+        streamUrl: `/api/media/playback/video-compat/movie/${movieRow.mediaId}`,
+        progressPercent,
+        updatedAt: progressEntry.updatedAt,
+      });
+      continue;
+    }
+
+    const episodeRow = episodeById.get(progressEntry.mediaId);
+    if (!episodeRow) continue;
+    const seriesRow = seriesById.get(episodeRow.seriesId);
+    if (!seriesRow) continue;
+
+    const episodeCode = formatSeasonEpisodeCode(episodeRow.season, episodeRow.episode);
+    const episodeTitle = episodeRow.episodeTitle?.trim() || `Episode ${episodeRow.episode}`;
+
+    appendItem({
+      id: `episode-${episodeRow.id}`,
+      mediaId: episodeRow.id,
+      mediaType: 'video',
+      mediaKind: 'episode',
+      title: `${episodeCode} - ${episodeTitle}`,
+      subtitle: seriesRow.title,
+      posterPath: seriesRow.posterPath,
+      backdropPath: seriesRow.backdropPath,
+      streamUrl: `/api/media/playback/video-compat/episode/${episodeRow.id}`,
+      progressPercent,
+      updatedAt: progressEntry.updatedAt,
+    });
+  }
+
+  if (previewItems.length < limit) {
+    const fallbackMovies = await db
+      .select({
+        mediaId: media.id,
+        title: media.title,
+        releaseDate: movies.releaseDate,
+        posterPath: media.posterPath,
+        backdropPath: media.backdropPath,
+        updatedAt: media.updatedAt,
+      })
+      .from(movies)
+      .innerJoin(media, eq(movies.mediaId, media.id))
+      .where(eq(movies.status, 'downloaded'))
+      .orderBy(desc(media.updatedAt))
+      .limit(limit * 3);
+
+    for (const row of fallbackMovies) {
+      if (previewItems.length >= limit) break;
+      appendItem({
+        id: `movie-${row.mediaId}`,
+        mediaId: row.mediaId,
+        mediaType: 'video',
+        mediaKind: 'movie',
+        title: row.title,
+        subtitle: row.releaseDate || undefined,
+        posterPath: row.posterPath,
+        backdropPath: row.backdropPath,
+        streamUrl: `/api/media/playback/video-compat/movie/${row.mediaId}`,
+        updatedAt: toEpochMs(row.updatedAt),
+      });
+    }
+  }
+
+  if (previewItems.length < limit) {
+    const fallbackEpisodeRows = await db
+      .select({
+        id: episodes.id,
+        seriesId: episodes.seriesId,
+        season: episodes.season,
+        episode: episodes.episode,
+        episodeTitle: episodes.title,
+        filePath: episodes.filePath,
+      })
+      .from(episodes)
+      .where(eq(episodes.downloaded, true))
+      .orderBy(desc(episodes.id))
+      .limit(limit * 6);
+
+    const fallbackSeriesIds = Array.from(new Set(
+      fallbackEpisodeRows
+        .map((row) => row.seriesId)
+        .filter((seriesId) => !seriesById.has(seriesId)),
+    ));
+
+    if (fallbackSeriesIds.length > 0) {
+      const fallbackSeriesRows = await db
+        .select({
+          seriesId: series.id,
+          title: media.title,
+          posterPath: media.posterPath,
+          backdropPath: media.backdropPath,
+        })
+        .from(series)
+        .innerJoin(media, eq(series.mediaId, media.id))
+        .where(inArray(series.id, fallbackSeriesIds));
+
+      for (const row of fallbackSeriesRows) {
+        seriesById.set(row.seriesId, row);
+      }
+    }
+
+    for (const row of fallbackEpisodeRows) {
+      if (previewItems.length >= limit) break;
+      if (!isAbsoluteOrRelativeFilePath(row.filePath)) continue;
+      const extension = path.extname(row.filePath).toLowerCase();
+      if (!PLAYABLE_VIDEO_EXTENSIONS.has(extension)) continue;
+
+      const seriesRow = seriesById.get(row.seriesId);
+      if (!seriesRow) continue;
+
+      const episodeCode = formatSeasonEpisodeCode(row.season, row.episode);
+      const episodeTitle = row.episodeTitle?.trim() || `Episode ${row.episode}`;
+      appendItem({
+        id: `episode-${row.id}`,
+        mediaId: row.id,
+        mediaType: 'video',
+        mediaKind: 'episode',
+        title: `${episodeCode} - ${episodeTitle}`,
+        subtitle: seriesRow.title,
+        posterPath: seriesRow.posterPath,
+        backdropPath: seriesRow.backdropPath,
+        streamUrl: `/api/media/playback/video-compat/episode/${row.id}`,
+        updatedAt: Date.now(),
+      });
+    }
+  }
+
+  return c.json({ items: previewItems.slice(0, limit) });
+});
+
 // Stream album artwork (if available) for audio player
 mediaRoutes.get('/playback/artwork/album/:id', async (c) => {
   const mediaId = parseIdParam(c.req.param('id'));
